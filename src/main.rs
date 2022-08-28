@@ -2,6 +2,7 @@ use gtk::prelude::{BoxExt, ButtonExt, GtkWindowExt, OrientableExt};
 use relm4::{gtk, ComponentParts, ComponentSender, RelmApp, SimpleComponent, WidgetPlus};
 
 mod read_dir;
+mod watch_dir;
 
 struct AppModel {
   counter: u8,
@@ -65,7 +66,8 @@ impl SimpleComponent for AppModel {
 
     let widgets = view_output!();
 
-    read_dir::read_dir();
+    read_dir::read_dir("/home/cdiesh/Music");
+    watch_dir::watch_dir("/home/cdiesh/Music");
 
     ComponentParts { model, widgets }
   }
