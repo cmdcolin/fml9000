@@ -1,6 +1,8 @@
 use gtk::prelude::{BoxExt, ButtonExt, GtkWindowExt, OrientableExt};
 use relm4::{gtk, ComponentParts, ComponentSender, RelmApp, SimpleComponent, WidgetPlus};
 
+mod read_dir;
+
 struct AppModel {
   counter: u8,
 }
@@ -61,8 +63,9 @@ impl SimpleComponent for AppModel {
   ) -> ComponentParts<Self> {
     let model = AppModel { counter };
 
-    // Insert the macro code generation here
     let widgets = view_output!();
+
+    read_dir::read_dir();
 
     ComponentParts { model, widgets }
   }

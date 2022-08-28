@@ -8,3 +8,6 @@ edition = "2021"
 [dependencies]
 relm4 = { git = "https://github.com/Relm4/Relm4.git", features = ["macros"] }
 relm4-components = { git = "https://github.com/Relm4/Relm4.git" }
+jwalk = "0.6"
+sqlite = "0.27"
+symphonia = { version = "0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
