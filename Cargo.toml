@@ -1,0 +1,10 @@
+[package]
+name = "fml9000"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+relm4 = { git = "https://github.com/Relm4/Relm4.git", features = ["macros"] }
+relm4-components = { git = "https://github.com/Relm4/Relm4.git" }
