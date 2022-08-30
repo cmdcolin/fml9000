@@ -1,127 +1,82 @@
-mod list_box_row;
-mod model;
-pub mod row_data;
-
-use gtk::{
-  glib::{self, clone},
-  prelude::*,
-  ResponseType,
-};
-use list_box_row::ListBoxRow;
-use row_data::RowData;
+mod application_row;
+use crate::application_row::ApplicationRow;
+use gtk::gio;
+use gtk::prelude::*;
 
 fn main() {
-  let application = gtk::Application::new(
-    Some("com.github.gtk-rs.examples.listbox-model"),
-    Default::default(),
-  );
-
+  let application = gtk::Application::new(Some("com.fml.music_player"), Default::default());
   application.connect_activate(build_ui);
-
   application.run();
 }
 
-fn build_ui(application: &gtk::Application) {
+fn build_ui(app: &gtk::Application) {
   let window = gtk::ApplicationWindow::builder()
-    .default_width(320)
-    .default_height(480)
-    .application(application)
-    .title("Custom Model")
+    .default_width(600)
+    .default_height(600)
+    .application(app)
+    .title("fml")
     .build();
 
-  let vbox = gtk::Box::new(gtk::Orientation::Vertical, 5);
+  let model = gio::ListStore::new(gio::AppInfo::static_type());
+  gio::AppInfo::all().iter().for_each(|app_info| {
+    model.append(app_info);
+  });
 
-  // Create our list store and specify that the type stored in the
-  // list should be the RowData GObject we define at the bottom
-  let model = model::Model::new();
+  let factory = gtk::SignalListItemFactory::new();
 
-  // And then create the UI part, the listbox and bind the list store
-  // model to it. Whenever the UI needs to show a new row, e.g. because
-  // it was notified that the model changed, it will call the callback
-  // with the corresponding item from the model and will ask for a new
-  // gtk::ListBoxRow that should be displayed.
-  //
-  // The gtk::ListBoxRow can contain any possible widgets.
+  // the "setup" stage is used for creating the widgets
+  factory.connect_setup(move |_factory, item| {
+    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let row = ApplicationRow::new();
+    item.set_child(Some(&row));
+  });
 
-  let listbox = gtk::ListBox::new();
-  listbox.bind_model(
-    Some(&model),
-    clone!(@weak window => @default-panic, move |item| {
-        ListBoxRow::new(
-            item.downcast_ref::<RowData>()
-                .expect("RowData is of wrong type"),
-        )
-        .upcast::<gtk::Widget>()
-    }),
-  );
+  // the bind stage is used for "binding" the data to the created widgets on the "setup" stage
+  factory.connect_bind(move |_factory, item| {
+    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let app_info = item.item().unwrap().downcast::<gio::AppInfo>().unwrap();
+    let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
+    child.set_app_info(&app_info);
+  });
+
+  // A sorter used to sort AppInfo in the model by their name
+  let sorter = gtk::CustomSorter::new(move |obj1, obj2| {
+    let app_info1 = obj1.downcast_ref::<gio::AppInfo>().unwrap();
+    let app_info2 = obj2.downcast_ref::<gio::AppInfo>().unwrap();
+
+    app_info1
+      .name()
+      .to_lowercase()
+      .cmp(&app_info2.name().to_lowercase())
+      .into()
+  });
+  let sorted_model = gtk::SortListModel::new(Some(&model), Some(&sorter));
+  let selection_model = gtk::SingleSelection::new(Some(&sorted_model));
+
+  let f1 = gtk::SignalListItemFactory::new();
+
+  let c1 = gtk::ColumnViewColumn::new(Some("K1"), Some(&f1));
+  let c2 = gtk::ColumnViewColumn::new(Some("K2"), Some(&f1));
+  let column_view = gtk::ColumnView::new(Some(&selection_model));
+  column_view.append_column(&c1);
+  column_view.append_column(&c2);
+
+  // Launch the application when an item of the list is activated
+  column_view.connect_activate(move |column_view, position| {
+    let model = column_view.model().unwrap();
+    let app_info = model
+      .item(position)
+      .unwrap()
+      .downcast::<gio::AppInfo>()
+      .unwrap();
+  });
 
   let scrolled_window = gtk::ScrolledWindow::builder()
     .hscrollbar_policy(gtk::PolicyType::Never) // Disable horizontal scrolling
-    .min_content_height(480)
     .min_content_width(360)
+    .child(&column_view)
     .build();
 
-  scrolled_window.set_child(Some(&listbox));
-
-  let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-
-  // The add button opens a new dialog which is basically the same as the edit
-  // dialog, except that we don't have a corresponding item yet at that point
-  // and only create it once the Ok button in the dialog is clicked, and only
-  // then add it to the model. Once added to the model, it will immediately
-  // appear in the listbox UI
-  let add_button = gtk::Button::with_label("Add");
-  add_button.connect_clicked(clone!(@weak window, @weak model => move |_| {
-        let dialog = gtk::Dialog::with_buttons(
-            Some("Add Item"),
-            Some(&window),
-            gtk::DialogFlags::MODAL,
-            &[("Ok", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
-        );
-        dialog.set_default_response(ResponseType::Ok);
-        let content_area = dialog.content_area();
-        let entry = gtk::Entry::new();
-        entry.connect_activate(clone!(@weak dialog => move |_| {
-            dialog.response(ResponseType::Ok);
-        }));
-        content_area.append(&entry);
-        let spin_button = gtk::SpinButton::with_range(0.0, 100.0, 1.0);
-        content_area.append(&spin_button);
-        dialog.connect_response(clone!(@weak model, @weak entry, @weak spin_button => move |dialog, resp| {
-            let text = entry.text();
-            if !text.is_empty() && resp == ResponseType::Ok {
-                model.append(&RowData::new(&text, spin_button.value() as u32));
-            }
-            dialog.close();
-        }));
-
-        dialog.show()
-    }));
-
-  hbox.append(&add_button);
-
-  // Via the delete button we delete the item from the model that
-  // is at the index of the selected row. Also deleting from the
-  // model is immediately reflected in the listbox.
-  let delete_button = gtk::Button::with_label("Delete");
-  delete_button.connect_clicked(clone!(@weak model, @weak listbox => move |_| {
-      let selected = listbox.selected_row();
-
-      if let Some(selected) = selected {
-          let idx = selected.index();
-          model.remove(idx as u32);
-      }
-  }));
-  hbox.append(&delete_button);
-
-  vbox.append(&hbox);
-  vbox.append(&scrolled_window);
-
-  window.set_child(Some(&vbox));
-
-  for i in 0..10 {
-    model.append(&RowData::new(&format!("Name {}", i), i * 10));
-  }
-
+  window.set_child(Some(&scrolled_window));
   window.show();
 }
