@@ -9,10 +9,6 @@ use gtk::CompositeTemplate;
 pub struct ApplicationRow {
   #[template_child]
   pub name: TemplateChild<gtk::Label>,
-  #[template_child]
-  pub description: TemplateChild<gtk::Label>,
-  #[template_child]
-  pub image: TemplateChild<gtk::Image>,
 }
 
 #[glib::object_subclass]

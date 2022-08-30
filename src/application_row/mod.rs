@@ -1,12 +1,10 @@
 mod imp;
-
-use gtk::prelude::*;
+use gtk::glib;
 use gtk::subclass::prelude::*;
-use gtk::{gio, glib};
 
 glib::wrapper! {
-  pub struct ApplicationRow(ObjectSubclass<imp::ApplicationRow>)
-    @extends gtk::Widget, gtk::Box;
+    pub struct ApplicationRow(ObjectSubclass<imp::ApplicationRow>)
+        @extends gtk::Widget, gtk::Box;
 }
 
 impl Default for ApplicationRow {
@@ -15,19 +13,17 @@ impl Default for ApplicationRow {
   }
 }
 
+pub struct Song {
+  pub name: String,
+}
+
 impl ApplicationRow {
   pub fn new() -> Self {
     glib::Object::new(&[]).expect("Failed to create ApplicationRow")
   }
 
-  pub fn set_app_info(&self, app_info: &gio::AppInfo) {
+  pub fn set_app_info(&self, app_info: &Song) {
     let imp = self.imp();
-    imp.name.set_text(&app_info.name());
-    if let Some(desc) = app_info.description() {
-      imp.description.set_text(&desc);
-    }
-    if let Some(icon) = app_info.icon() {
-      imp.image.set_from_gicon(&icon);
-    }
+    imp.name.set_text(&app_info.name);
   }
 }
