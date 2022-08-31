@@ -6,6 +6,8 @@ use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use jwalk::WalkDir;
+use lofty::ItemKey::AlbumArtist;
+use lofty::{Accessor, Probe};
 use std::cell::Ref;
 
 struct Song {
@@ -21,6 +23,7 @@ fn main() {
   app.connect_activate(build_ui);
   app.run();
 }
+
 fn build_ui(application: &gtk::Application) {
   let window = gtk::ApplicationWindow::builder()
     .default_width(800)
@@ -32,16 +35,47 @@ fn build_ui(application: &gtk::Application) {
   let vbox = gtk::Box::new(gtk::Orientation::Vertical, 5);
 
   let store = gio::ListStore::new(BoxedAnyObject::static_type());
-
+  let mut i = 0;
   for entry in WalkDir::new("/home/cdiesh/Music") {
-    let b = BoxedAnyObject::new(Song {
-      album_artist: "V/A".to_string(),
-      artist: "ArtistName".to_string(),
-      album: "AlbumName".to_string(),
-      title: "Title".to_string(),
-      filename: entry.unwrap().path().display().to_string(),
-    });
-    store.append(&b);
+    let ent = entry.unwrap();
+
+    if ent.file_type().is_file() && i < 100 {
+      let path = ent.path();
+      let path2 = path.clone();
+      let path3 = path.clone();
+
+      // Use the default options for metadata and format readers.
+      let tagged_file = Probe::open(path)
+        .expect("ERROR: Bad path provided!")
+        .read(true);
+      match tagged_file {
+        Ok(tagged_file) => {
+          let tag = match tagged_file.primary_tag() {
+            Some(primary_tag) => Some(primary_tag),
+            None => tagged_file.first_tag(),
+          };
+
+          match tag {
+            Some(tag) => {
+              let val = tag.get_string(&AlbumArtist).unwrap();
+              let b = BoxedAnyObject::new(Song {
+                album_artist: val.to_string(),
+                artist: tag.artist().unwrap_or("None").to_string(),
+                album: tag.album().unwrap_or("None").to_string(),
+                title: tag.title().unwrap_or("None").to_string(),
+                filename: path2.display().to_string(),
+              });
+              store.append(&b);
+              i = i + 1;
+            }
+            None => {}
+          }
+        }
+        Err(e) => {
+          println!("{} {}", e, path3.display());
+        }
+      }
+    }
   }
   let sel = gtk::SingleSelection::new(Some(&store));
   let listbox = gtk::ColumnView::new(Some(&sel));
@@ -66,7 +100,7 @@ fn build_ui(application: &gtk::Application) {
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Song> = app_info.borrow();
     let song = Entry {
-      name: format!("{} / {}", r.artist, r.album),
+      name: format!("{} / {}", r.album, r.artist),
     };
     child.set_entry(&song);
   });
