@@ -13,7 +13,7 @@ impl Default for ApplicationRow {
   }
 }
 
-pub struct Song {
+pub struct Entry {
   pub name: String,
 }
 
@@ -22,7 +22,7 @@ impl ApplicationRow {
     glib::Object::new(&[]).expect("Failed to create ApplicationRow")
   }
 
-  pub fn set_app_info(&self, app_info: &Song) {
+  pub fn set_entry(&self, app_info: &Entry) {
     let imp = self.imp();
     imp.name.set_text(&app_info.name);
   }
