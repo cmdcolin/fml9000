@@ -1,7 +1,11 @@
 mod application_row;
-
+pub mod models;
+pub mod schema;
 use crate::application_row::ApplicationRow;
 use crate::application_row::Entry;
+use diesel::prelude::*;
+use diesel::sqlite::SqliteConnection;
+use dotenvy::dotenv;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
@@ -9,6 +13,10 @@ use jwalk::WalkDir;
 use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
 use std::cell::Ref;
+use std::env;
+
+use self::schema::tracks::dsl::*;
+use crate::models::*;
 
 struct Song {
   album_artist: String,
@@ -24,17 +32,41 @@ fn main() {
   app.run();
 }
 
+pub fn establish_connection() -> SqliteConnection {
+  dotenv().ok();
+
+  let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+  SqliteConnection::establish(&database_url)
+    .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+}
+
 fn build_ui(application: &gtk::Application) {
   let window = gtk::ApplicationWindow::builder()
     .default_width(1200)
-    .default_height(800)
+    .default_height(600)
     .application(application)
     .title("fml9001")
     .build();
 
-  let vbox = gtk::Box::new(gtk::Orientation::Vertical, 5);
+  let grid = gtk::Grid::builder().hexpand(true).vexpand(true).build();
 
+  let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
+  let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
+
+  let connection = &mut establish_connection();
+  let results = tracks
+    .limit(5)
+    .load::<Track>(connection)
+    .expect("Error loading tracks");
+
+  println!("Displaying {} tracks", results.len());
+  for post in results {
+    println!("{}", post.title);
+    println!("-----------\n");
+    println!("{}", post.artist);
+  }
+
   let mut i = 0;
   for entry in WalkDir::new("/home/cdiesh/Music") {
     let ent = entry.unwrap();
@@ -76,25 +108,31 @@ fn build_ui(application: &gtk::Application) {
     }
   }
   let playlist_sel = gtk::SingleSelection::new(Some(&playlist_store));
-  let playlist_listbox = gtk::ColumnView::new(Some(&playlist_sel));
+  let playlist_columnview = gtk::ColumnView::new(Some(&playlist_sel));
 
-  let facet_sel = gtk::SingleSelection::new(Some(&playlist_store));
-  let facet_listbox = gtk::ColumnView::new(Some(&facet_sel));
+  let facet_sel = gtk::SingleSelection::new(Some(&facet_store));
+  let facet_columnview = gtk::ColumnView::new(Some(&facet_sel));
+
+  let playlist_manager_sel = gtk::SingleSelection::new(Some(&playlist_manager_store));
+  let playlist_manager_columnview = gtk::ColumnView::new(Some(&playlist_manager_sel));
 
   let artistalbum = gtk::SignalListItemFactory::new();
   let title = gtk::SignalListItemFactory::new();
   let filename = gtk::SignalListItemFactory::new();
   let facet = gtk::SignalListItemFactory::new();
+  let playlist_manager = gtk::SignalListItemFactory::new();
 
   let playlist_col1 = gtk::ColumnViewColumn::new(Some("Artist / Album"), Some(&artistalbum));
   let playlist_col2 = gtk::ColumnViewColumn::new(Some("Title"), Some(&title));
   let playlist_col3 = gtk::ColumnViewColumn::new(Some("Filename"), Some(&filename));
   let facet_col = gtk::ColumnViewColumn::new(Some("X"), Some(&facet));
+  let playlist_manager_col = gtk::ColumnViewColumn::new(Some("Playlists"), Some(&playlist_manager));
 
-  playlist_listbox.append_column(&playlist_col1);
-  playlist_listbox.append_column(&playlist_col2);
-  playlist_listbox.append_column(&playlist_col3);
-  facet_listbox.append_column(&facet_col);
+  playlist_columnview.append_column(&playlist_col1);
+  playlist_columnview.append_column(&playlist_col2);
+  playlist_columnview.append_column(&playlist_col3);
+  facet_columnview.append_column(&facet_col);
+  playlist_manager_columnview.append_column(&playlist_manager_col);
 
   facet.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
@@ -165,21 +203,31 @@ fn build_ui(application: &gtk::Application) {
   });
 
   let facet_window = gtk::ScrolledWindow::builder()
-    .min_content_height(480)
-    .min_content_width(360)
+    .min_content_height(390)
+    .min_content_width(600)
     .build();
 
   let playlist_window = gtk::ScrolledWindow::builder()
-    .min_content_height(480)
-    .min_content_width(360)
+    .min_content_height(390)
+    .min_content_width(600)
     .build();
 
-  facet_window.set_child(Some(&facet_listbox));
-  playlist_window.set_child(Some(&playlist_listbox));
+  let playlist_manager_window = gtk::ScrolledWindow::builder()
+    .min_content_width(600)
+    .min_content_height(390)
+    .build();
 
-  vbox.append(&facet_window);
-  vbox.append(&playlist_window);
+  let album_art = gtk::Image::builder().file("/home/cdiesh/wow.png").build();
 
-  window.set_child(Some(&vbox));
+  facet_window.set_child(Some(&facet_columnview));
+  playlist_window.set_child(Some(&playlist_columnview));
+  playlist_manager_window.set_child(Some(&playlist_manager_columnview));
+
+  grid.attach(&facet_window, 0, 0, 1, 1);
+  grid.attach(&playlist_window, 0, 1, 1, 1);
+  grid.attach(&playlist_manager_window, 1, 0, 1, 1);
+  grid.attach(&album_art, 1, 1, 1, 1);
+
+  window.set_child(Some(&grid));
   window.show();
 }
