@@ -1,5 +1,6 @@
 CREATE TABLE tracks (
-  filename VARCHAR PRIMARY KEY,
+  id INTEGER PRIMARY KEY,
+  filename VARCHAR,
   title VARCHAR,
   artist VARCHAR,
   album VARCHAR,

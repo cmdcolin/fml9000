@@ -15,7 +15,6 @@ use lofty::{Accessor, Probe};
 use std::cell::Ref;
 use std::env;
 
-use self::schema::tracks::dsl::*;
 use crate::models::*;
 
 struct Song {
@@ -30,6 +29,23 @@ fn main() {
   let app = gtk::Application::new(Some("com.github.fml9001"), Default::default());
   app.connect_activate(build_ui);
   app.run();
+}
+
+fn query_db() {
+  use self::schema::tracks::dsl::*;
+
+  let connection = &mut establish_connection();
+  let results = tracks
+    .limit(5)
+    .load::<Track>(connection)
+    .expect("Error loading tracks");
+
+  println!("Displaying {} tracks", results.len());
+  for post in results {
+    println!("{}", post.title);
+    println!("-----------\n");
+    println!("{}", post.artist);
+  }
 }
 
 pub fn establish_connection() -> SqliteConnection {
@@ -53,19 +69,6 @@ fn build_ui(application: &gtk::Application) {
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
-
-  let connection = &mut establish_connection();
-  let results = tracks
-    .limit(5)
-    .load::<Track>(connection)
-    .expect("Error loading tracks");
-
-  println!("Displaying {} tracks", results.len());
-  for post in results {
-    println!("{}", post.title);
-    println!("-----------\n");
-    println!("{}", post.artist);
-  }
 
   let mut i = 0;
   for entry in WalkDir::new("/home/cdiesh/Music") {

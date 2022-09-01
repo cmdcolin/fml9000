@@ -1,7 +1,8 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    tracks (filename) {
+    tracks (id) {
+        id -> Nullable<Integer>,
         filename -> Nullable<Text>,
         title -> Nullable<Text>,
         artist -> Nullable<Text>,
