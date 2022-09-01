@@ -34,7 +34,8 @@ fn build_ui(application: &gtk::Application) {
 
   let vbox = gtk::Box::new(gtk::Orientation::Vertical, 5);
 
-  let store = gio::ListStore::new(BoxedAnyObject::static_type());
+  let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
+  let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let mut i = 0;
   for entry in WalkDir::new("/home/cdiesh/Music") {
     let ent = entry.unwrap();
@@ -57,15 +58,14 @@ fn build_ui(application: &gtk::Application) {
 
           match tag {
             Some(tag) => {
-              let val = tag.get_string(&AlbumArtist).unwrap();
               let b = BoxedAnyObject::new(Song {
-                album_artist: val.to_string(),
+                album_artist: tag.get_string(&AlbumArtist).unwrap_or("None").to_string(),
                 artist: tag.artist().unwrap_or("None").to_string(),
                 album: tag.album().unwrap_or("None").to_string(),
                 title: tag.title().unwrap_or("None").to_string(),
                 filename: path2.display().to_string(),
               });
-              store.append(&b);
+              playlist_store.append(&b);
               i = i + 1;
             }
             None => {}
@@ -77,8 +77,10 @@ fn build_ui(application: &gtk::Application) {
       }
     }
   }
-  let sel = gtk::SingleSelection::new(Some(&store));
-  let listbox = gtk::ColumnView::new(Some(&sel));
+  let playlist_sel = gtk::SingleSelection::new(Some(&playlist_store));
+  let playlist_listbox = gtk::ColumnView::new(Some(&playlist_sel));
+  let facet_sel = gtk::SingleSelection::new(Some(&facet_store));
+  let facet_listbox = gtk::ColumnView::new(Some(&facet_sel));
 
   let artistalbum = gtk::SignalListItemFactory::new();
   let title = gtk::SignalListItemFactory::new();
@@ -139,17 +141,25 @@ fn build_ui(application: &gtk::Application) {
     child.set_entry(&song);
   });
 
-  listbox.append_column(&col1);
-  listbox.append_column(&col2);
-  listbox.append_column(&col3);
+  playlist_listbox.append_column(&col1);
+  playlist_listbox.append_column(&col2);
+  playlist_listbox.append_column(&col3);
 
-  let scrolled_window = gtk::ScrolledWindow::builder()
+  let facet_window = gtk::ScrolledWindow::builder()
     .min_content_height(480)
     .min_content_width(360)
     .build();
 
-  scrolled_window.set_child(Some(&listbox));
-  vbox.append(&scrolled_window);
+  let playlist_window = gtk::ScrolledWindow::builder()
+    .min_content_height(480)
+    .min_content_width(360)
+    .build();
+
+  facet_window.set_child(Some(&facet_listbox));
+  playlist_window.set_child(Some(&playlist_listbox));
+
+  vbox.append(&facet_window);
+  vbox.append(&playlist_window);
 
   window.set_child(Some(&vbox));
   window.show();
