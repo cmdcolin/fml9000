@@ -1,5 +1,4 @@
 mod application_row;
-mod query;
 use crate::application_row::ApplicationRow;
 use crate::application_row::Entry;
 use gtk::gio;
@@ -8,6 +7,7 @@ use gtk::prelude::*;
 use jwalk::WalkDir;
 use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
+use rusqlite::{Connection, Result};
 use std::cell::Ref;
 
 struct Song {
@@ -17,11 +17,82 @@ struct Song {
   title: String,
   filename: String,
 }
+struct DbSong<'a> {
+  album_artist: Option<&'a str>,
+  album: Option<&'a str>,
+  artist: Option<&'a str>,
+  title: Option<&'a str>,
+  filename: &'a str,
+}
 
 fn main() {
   let app = gtk::Application::new(Some("com.github.fml9001"), Default::default());
   app.connect_activate(build_ui);
   app.run();
+}
+
+fn connect_db() -> Result<Connection, rusqlite::Error> {
+  let conn = Connection::open_in_memory()?;
+
+  conn.execute(
+    "CREATE TABLE tracks (
+        id INTEGER NOT NULL PRIMARY KEY,
+        filename VARCHAR NOT NULL,
+        title VARCHAR,
+        artist VARCHAR,
+        album VARCHAR,
+        album_artist VARCHAR
+      )",
+    (), // empty list of parameters.
+  )?;
+
+  Ok(conn)
+}
+
+fn process_file(conn: &Connection, path: &str) -> Result<(), rusqlite::Error> {
+  let tagged_file = Probe::open(path)
+    .expect("ERROR: Bad path provided!")
+    .read(true);
+  match tagged_file {
+    Ok(tagged_file) => {
+      let tag = match tagged_file.primary_tag() {
+        Some(primary_tag) => Some(primary_tag),
+        None => tagged_file.first_tag(),
+      };
+
+      match tag {
+        Some(tag) => {
+          let s = DbSong {
+            album_artist: tag.get_string(&AlbumArtist),
+            artist: tag.artist(),
+            album: tag.album(),
+            title: tag.title(),
+            filename: path,
+          };
+          conn.execute(
+            "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&path, &s.artist, &s.album, &s.album_artist, &s.title),
+          )?;
+
+          Ok(())
+        }
+        None => Ok(()),
+      }
+    }
+    Err(_) => Ok(()),
+  }
+}
+
+fn init_db() -> Result<(), rusqlite::Error> {
+  let conn = connect_db()?;
+  for entry in WalkDir::new("/home/cdiesh/Music") {
+    let ent = entry.unwrap();
+    if ent.file_type().is_file() {
+      let path = ent.path();
+      process_file(&conn, &path.display().to_string())?;
+    }
+  }
+  Ok(())
 }
 
 fn build_ui(application: &gtk::Application) {
@@ -32,7 +103,14 @@ fn build_ui(application: &gtk::Application) {
     .title("fml9001")
     .build();
 
-  query::query_db();
+  match init_db() {
+    Ok(_) => {
+      println!("success");
+    }
+    Err(e) => {
+      println!("{}", e);
+    }
+  }
 
   let grid = gtk::Grid::builder().hexpand(true).vexpand(true).build();
 
@@ -40,46 +118,18 @@ fn build_ui(application: &gtk::Application) {
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
-  let mut i = 0;
-  for entry in WalkDir::new("/home/cdiesh/Music") {
-    let ent = entry.unwrap();
+  // let mut stmt = conn.prepare("SELECT id, name, data FROM person")?;
+  // let person_iter = stmt.query_map([], |row| {
+  //   Ok(Person {
+  //     id: row.get(0)?,
+  //     name: row.get(1)?,
+  //     data: row.get(2)?,
+  //   })
+  // })?;
 
-    if ent.file_type().is_file() && i < 100 {
-      let path = ent.path();
-      let path2 = path.clone();
-
-      // Use the default options for metadata and format readers.
-      let tagged_file = Probe::open(path)
-        .expect("ERROR: Bad path provided!")
-        .read(true);
-      match tagged_file {
-        Ok(tagged_file) => {
-          let tag = match tagged_file.primary_tag() {
-            Some(primary_tag) => Some(primary_tag),
-            None => tagged_file.first_tag(),
-          };
-
-          match tag {
-            Some(tag) => {
-              let b = BoxedAnyObject::new(Song {
-                album_artist: tag.get_string(&AlbumArtist).unwrap_or("None").to_string(),
-                artist: tag.artist().unwrap_or("None").to_string(),
-                album: tag.album().unwrap_or("None").to_string(),
-                title: tag.title().unwrap_or("None").to_string(),
-                filename: path2.display().to_string(),
-              });
-              playlist_store.append(&b);
-              i = i + 1;
-            }
-            None => {}
-          }
-        }
-        Err(_) => {
-          // println!("{} {}", e, path3.display());
-        }
-      }
-    }
-  }
+  // for person in person_iter {
+  //   println!("Found person {:?}", person.unwrap());
+  // }
   let playlist_sel = gtk::SingleSelection::new(Some(&playlist_store));
   let playlist_columnview = gtk::ColumnView::new(Some(&playlist_sel));
 

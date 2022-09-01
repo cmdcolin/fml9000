@@ -10,6 +10,6 @@ jwalk = "0.6"
 symphonia = { version = "0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
 notify = "4.0"
 gtk = { version = "0.4", package = "gtk4" }
-diesel = { version = "2.0.0", features = ["sqlite"] }
 dotenvy = "0.15"
+rusqlite = { version = "0.28.0", features = ["bundled"] }
 lofty = "0.8.0"
