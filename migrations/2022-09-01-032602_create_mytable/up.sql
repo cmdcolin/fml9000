@@ -1,8 +1,5 @@
 CREATE TABLE tracks (
-  id INTEGER PRIMARY KEY,
-  filename VARCHAR,
-  title VARCHAR,
-  artist VARCHAR,
-  album VARCHAR,
-  album_artist VARCHAR
-);
+  id INTEGER NOT NULL PRIMARY KEY,
+  filename VARCHAR NOT NULL,
+  published BOOLEAN NOT NULL DEFAULT FALSE
+)

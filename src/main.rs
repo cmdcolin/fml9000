@@ -1,11 +1,7 @@
 mod application_row;
-pub mod models;
-pub mod schema;
+mod query;
 use crate::application_row::ApplicationRow;
 use crate::application_row::Entry;
-use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
-use dotenvy::dotenv;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
@@ -13,9 +9,6 @@ use jwalk::WalkDir;
 use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
 use std::cell::Ref;
-use std::env;
-
-use crate::models::*;
 
 struct Song {
   album_artist: String,
@@ -31,31 +24,6 @@ fn main() {
   app.run();
 }
 
-fn query_db() {
-  use self::schema::tracks::dsl::*;
-
-  let connection = &mut establish_connection();
-  let results = tracks
-    .limit(5)
-    .load::<Track>(connection)
-    .expect("Error loading tracks");
-
-  println!("Displaying {} tracks", results.len());
-  for post in results {
-    println!("{}", post.title);
-    println!("-----------\n");
-    println!("{}", post.artist);
-  }
-}
-
-pub fn establish_connection() -> SqliteConnection {
-  dotenv().ok();
-
-  let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-  SqliteConnection::establish(&database_url)
-    .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
-}
-
 fn build_ui(application: &gtk::Application) {
   let window = gtk::ApplicationWindow::builder()
     .default_width(1200)
@@ -63,6 +31,8 @@ fn build_ui(application: &gtk::Application) {
     .application(application)
     .title("fml9001")
     .build();
+
+  query::query_db();
 
   let grid = gtk::Grid::builder().hexpand(true).vexpand(true).build();
 
