@@ -1,0 +1,6 @@
+- Auto-playlist maker (e.g. combine similar artists into a playlist)
+- Shuffle
+- Playlists
+- Recently played
+- Recently added
+- Like/dislike song
