@@ -1,15 +1,16 @@
 [package]
-name = "fml9001"
+name = "fml9000"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-jwalk = "0.6"
 symphonia = { version = "0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
-notify = "4.0"
+notify = "4"
 gtk = { version = "0.4", package = "gtk4" }
 dotenvy = "0.15"
-rusqlite = { version = "0.28.0", features = ["bundled"] }
-lofty = "0.8.0"
+rusqlite = { version = "0.28", features = ["bundled"] }
+lofty = "0.8"
+walkdir = "2"
+rayon ="1"

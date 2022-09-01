@@ -1,6 +1,4 @@
-## fml9001
-
-It's over 9000
+## fml9000
 
 ## Goals
 
@@ -15,8 +13,8 @@ Struggling to understand both rust and gtk
 ## Usage
 
 ```
-git clone https://github.com/cmdcolin/fml9001
-cd fml9001
+git clone https://github.com/cmdcolin/fml9000
+cd fml9000
 cargo run
 ```
 

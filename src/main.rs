@@ -1,23 +1,25 @@
 mod application_row;
+
 use crate::application_row::ApplicationRow;
 use crate::application_row::Entry;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
-use jwalk::WalkDir;
 use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, Transaction};
 use std::cell::Ref;
+use std::fs;
+use walkdir::WalkDir;
 
-struct Song {
+struct Track {
   album_artist: String,
   album: String,
   artist: String,
   title: String,
   filename: String,
 }
-struct DbSong<'a> {
+struct DbTrack<'a> {
   album_artist: Option<&'a str>,
   album: Option<&'a str>,
   artist: Option<&'a str>,
@@ -26,13 +28,27 @@ struct DbSong<'a> {
 }
 
 fn main() {
-  let app = gtk::Application::new(Some("com.github.fml9001"), Default::default());
-  app.connect_activate(build_ui);
-  app.run();
+  match init_db() {
+    Ok(conn) => {
+      println!("initialized");
+
+      match print_db(&conn) {
+        Ok(_) => {
+          println!("printed");
+        }
+        Err(e) => {
+          println!("{}", e);
+        }
+      }
+    }
+    Err(e) => {
+      println!("{}", e);
+    }
+  }
 }
 
 fn connect_db() -> Result<Connection, rusqlite::Error> {
-  let conn = Connection::open_in_memory()?;
+  let conn = Connection::open_with_flags("test.db", rusqlite::OpenFlags::default())?;
 
   conn.execute(
     "CREATE TABLE tracks (
@@ -49,7 +65,52 @@ fn connect_db() -> Result<Connection, rusqlite::Error> {
   Ok(conn)
 }
 
-fn process_file(conn: &Connection, path: &str) -> Result<(), rusqlite::Error> {
+struct ChunkedIterator<T, R>
+where
+  T: Iterator<Item = R>,
+{
+  source: T,
+  inner: Vec<R>,
+  size: usize,
+}
+impl<T, R> ChunkedIterator<T, R>
+where
+  T: Iterator<Item = R>,
+{
+  fn new(source: T, size: usize) -> Self {
+    ChunkedIterator {
+      size: size - 1,
+      inner: vec![],
+      source,
+    }
+  }
+}
+impl<T, R> Iterator for ChunkedIterator<T, R>
+where
+  T: Iterator<Item = R>,
+{
+  type Item = Vec<R>;
+
+  fn next(&mut self) -> Option<Vec<R>> {
+    while let inner_opt = self.source.next() {
+      match inner_opt {
+        Some(inner_item) => {
+          self.inner.push(inner_item);
+          if self.inner.len() > self.size {
+            return Some(self.inner.split_off(0));
+          }
+        }
+        None => match self.inner.len() {
+          0 => return None,
+          _ => return Some(self.inner.split_off(0)),
+        },
+      }
+    }
+    None
+  }
+}
+
+fn process_file<'a>(path: &str) -> Result<(), rusqlite::Error> {
   let tagged_file = Probe::open(path)
     .expect("ERROR: Bad path provided!")
     .read(true);
@@ -62,17 +123,22 @@ fn process_file(conn: &Connection, path: &str) -> Result<(), rusqlite::Error> {
 
       match tag {
         Some(tag) => {
-          let s = DbSong {
+          let s = DbTrack {
             album_artist: tag.get_string(&AlbumArtist),
             artist: tag.artist(),
             album: tag.album(),
             title: tag.title(),
             filename: path,
           };
-          conn.execute(
-            "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&path, &s.artist, &s.album, &s.album_artist, &s.title),
-          )?;
+          println!(
+            "{} {}",
+            tag.artist().unwrap_or("None"),
+            tag.album().unwrap_or("None")
+          );
+          // tx.execute(
+          //   "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
+          //   (&path, &s.artist, &s.album, &s.album_artist, &s.title),
+          // )?;
 
           Ok(())
         }
@@ -83,15 +149,53 @@ fn process_file(conn: &Connection, path: &str) -> Result<(), rusqlite::Error> {
   }
 }
 
-fn init_db() -> Result<(), rusqlite::Error> {
-  let conn = connect_db()?;
-  for entry in WalkDir::new("/home/cdiesh/Music") {
-    let ent = entry.unwrap();
-    if ent.file_type().is_file() {
-      let path = ent.path();
-      process_file(&conn, &path.display().to_string())?;
+fn init_db() -> Result<Connection, rusqlite::Error> {
+  let mut conn = connect_db()?;
+  let mut i = 0;
+  let transaction_size = 10000;
+
+  for chunk in ChunkedIterator::new(
+    WalkDir::new("/home/cdiesh/Music")
+      .into_iter()
+      .filter_map(|e| e.ok()),
+    transaction_size,
+  ) {
+    // let tx = conn.transaction()?;
+    for file in chunk {
+      if file.file_type().is_file() && i < 10000 {
+        let path = file.path();
+        process_file(&path.display().to_string())?;
+        i = i + 1;
+        println!("{} {}", i, path.display());
+      }
+    }
+    // tx.commit()?
+  }
+  Ok(conn)
+}
+
+#[derive(Debug)]
+struct Temp {
+  filename: String,
+  title: String,
+}
+
+fn print_db(conn: &Connection) -> Result<(), rusqlite::Error> {
+  let mut stmt = conn.prepare("SELECT filename,title FROM tracks")?;
+  let track_iter = stmt.query_map([], |row| {
+    Ok(Temp {
+      filename: row.get(0)?,
+      title: row.get(1)?,
+    })
+  })?;
+
+  for track in track_iter {
+    match track {
+      Ok(t) => println!("Found track {:?}", t),
+      Err(e) => println!("{}", e),
     }
   }
+
   Ok(())
 }
 
@@ -100,12 +204,21 @@ fn build_ui(application: &gtk::Application) {
     .default_width(1200)
     .default_height(600)
     .application(application)
-    .title("fml9001")
+    .title("fml9000")
     .build();
 
   match init_db() {
-    Ok(_) => {
-      println!("success");
+    Ok(conn) => {
+      println!("initialized");
+
+      match print_db(&conn) {
+        Ok(_) => {
+          println!("printed");
+        }
+        Err(e) => {
+          println!("{}", e);
+        }
+      }
     }
     Err(e) => {
       println!("{}", e);
@@ -118,18 +231,6 @@ fn build_ui(application: &gtk::Application) {
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
-  // let mut stmt = conn.prepare("SELECT id, name, data FROM person")?;
-  // let person_iter = stmt.query_map([], |row| {
-  //   Ok(Person {
-  //     id: row.get(0)?,
-  //     name: row.get(1)?,
-  //     data: row.get(2)?,
-  //   })
-  // })?;
-
-  // for person in person_iter {
-  //   println!("Found person {:?}", person.unwrap());
-  // }
   let playlist_sel = gtk::SingleSelection::new(Some(&playlist_store));
   let playlist_columnview = gtk::ColumnView::new(Some(&playlist_sel));
 
@@ -167,7 +268,7 @@ fn build_ui(application: &gtk::Application) {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Song> = app_info.borrow();
+    let r: Ref<Track> = app_info.borrow();
     let song = Entry {
       name: format!("{} / {}", r.album_artist, r.album),
     };
@@ -184,7 +285,7 @@ fn build_ui(application: &gtk::Application) {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Song> = app_info.borrow();
+    let r: Ref<Track> = app_info.borrow();
     let song = Entry {
       name: format!("{} / {}", r.album, r.artist),
     };
@@ -201,7 +302,7 @@ fn build_ui(application: &gtk::Application) {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Song> = app_info.borrow();
+    let r: Ref<Track> = app_info.borrow();
     let song = Entry {
       name: r.title.to_string(),
     };
@@ -218,7 +319,7 @@ fn build_ui(application: &gtk::Application) {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Song> = app_info.borrow();
+    let r: Ref<Track> = app_info.borrow();
     let song = Entry {
       name: r.filename.to_string(),
     };
