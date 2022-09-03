@@ -162,8 +162,6 @@ fn build_ui(application: &gtk::Application) {
 
   // run_scan();
 
-  let grid = gtk::Grid::builder().hexpand(true).vexpand(true).build();
-
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
@@ -309,11 +307,16 @@ fn build_ui(application: &gtk::Application) {
   playlist_window.set_child(Some(&playlist_columnview));
   playlist_manager_window.set_child(Some(&playlist_manager_columnview));
 
-  grid.attach(&facet_window, 0, 0, 1, 1);
-  grid.attach(&playlist_window, 0, 1, 1, 1);
-  grid.attach(&playlist_manager_window, 1, 0, 1, 1);
-  grid.attach(&album_art, 1, 1, 1, 1);
+  let lrpane = gtk::Paned::new(gtk::Orientation::Horizontal);
+  let ltopbottom = gtk::Paned::new(gtk::Orientation::Vertical);
+  let rtopbottom = gtk::Paned::new(gtk::Orientation::Vertical);
+  ltopbottom.set_start_child(Some(&facet_window));
+  ltopbottom.set_end_child(Some(&playlist_window));
+  rtopbottom.set_start_child(Some(&playlist_manager_window));
+  rtopbottom.set_end_child(Some(&album_art));
+  lrpane.set_start_child(Some(&ltopbottom));
+  lrpane.set_end_child(Some(&rtopbottom));
 
-  window.set_child(Some(&grid));
+  window.set_child(Some(&lrpane));
   window.show();
 }
