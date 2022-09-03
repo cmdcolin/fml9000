@@ -207,18 +207,21 @@ fn build_ui(application: &gtk::Application) {
   let playlist_manager = gtk::SignalListItemFactory::new();
 
   let playlist_col1 = gtk::ColumnViewColumn::builder()
+    .expand(false)
     .resizable(true)
     .title("Artist / Album")
     .factory(&artistalbum)
     .build();
 
   let playlist_col2 = gtk::ColumnViewColumn::builder()
+    .expand(false)
     .resizable(true)
     .title("Title")
     .factory(&title)
     .build();
 
   let playlist_col3 = gtk::ColumnViewColumn::builder()
+    .expand(false)
     .resizable(true)
     .title("Filename")
     .factory(&filename)
@@ -313,9 +316,7 @@ fn build_ui(application: &gtk::Application) {
   });
 
   let facet_window = gtk::ScrolledWindow::builder().build();
-
   let playlist_window = gtk::ScrolledWindow::builder().build();
-
   let playlist_manager_window = gtk::ScrolledWindow::builder().build();
 
   let album_art = gtk::Image::builder().file("/home/cdiesh/wow.png").build();
