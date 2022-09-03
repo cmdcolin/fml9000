@@ -268,6 +268,17 @@ fn build_ui(application: &Application) {
   facet_columnview.append_column(&facet_col);
   playlist_manager_columnview.append_column(&playlist_manager_col);
 
+  playlist_columnview.connect_activate(|columnview, position| {
+    let model = columnview.model().unwrap();
+    let item = model
+      .item(position)
+      .unwrap()
+      .downcast::<BoxedAnyObject>()
+      .unwrap();
+    let r: Ref<Track> = item.borrow();
+    println!("{}", r.filename);
+  });
+
   load_playlist_store_db(&playlist_store);
   load_facet_db(&facet_store);
 
@@ -280,16 +291,15 @@ fn build_ui(application: &Application) {
   facet.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Facet> = app_info.borrow();
-    let song = Entry {
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<Facet> = obj.borrow();
+    child.set_entry(&Entry {
       name: format!(
         "{} / {}",
         r.album_artist.as_ref().unwrap_or(&"".to_string()),
         r.album.as_ref().unwrap_or(&"".to_string()),
       ),
-    };
-    child.set_entry(&song);
+    });
   });
 
   artistalbum.connect_setup(move |_factory, item| {
@@ -301,16 +311,15 @@ fn build_ui(application: &Application) {
   artistalbum.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = app_info.borrow();
-    let song = Entry {
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<Track> = obj.borrow();
+    child.set_entry(&Entry {
       name: format!(
         "{} / {}",
         r.album.as_ref().unwrap_or(&"".to_string()),
         r.artist.as_ref().unwrap_or(&"".to_string()),
       ),
-    };
-    child.set_entry(&song);
+    });
   });
 
   title.connect_setup(move |_factory, item| {
@@ -322,12 +331,11 @@ fn build_ui(application: &Application) {
   title.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = app_info.borrow();
-    let song = Entry {
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<Track> = obj.borrow();
+    child.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
-    };
-    child.set_entry(&song);
+    });
   });
 
   filename.connect_setup(move |_factory, item| {
@@ -339,12 +347,11 @@ fn build_ui(application: &Application) {
   filename.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = app_info.borrow();
-    let song = Entry {
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<Track> = obj.borrow();
+    child.set_entry(&Entry {
       name: r.filename.to_string(),
-    };
-    child.set_entry(&song);
+    });
   });
 
   let facet_window = ScrolledWindow::builder().child(&facet_columnview).build();
