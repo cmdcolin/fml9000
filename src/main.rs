@@ -1,5 +1,6 @@
 mod chunked_iterator;
 mod grid_cell;
+mod play_track;
 
 use crate::grid_cell::Entry;
 use crate::grid_cell::GridCell;
@@ -277,6 +278,8 @@ fn build_ui(application: &Application) {
       .unwrap();
     let r: Ref<Track> = item.borrow();
     println!("{}", r.filename);
+    let f = r.filename.clone();
+    thread::spawn(move || play_track::play_track(&f));
   });
 
   load_playlist_store_db(&playlist_store);
@@ -355,9 +358,11 @@ fn build_ui(application: &Application) {
   });
 
   let facet_window = ScrolledWindow::builder().child(&facet_columnview).build();
+
   let playlist_window = ScrolledWindow::builder()
     .child(&playlist_columnview)
     .build();
+
   let playlist_manager_window = ScrolledWindow::builder()
     .child(&playlist_manager_columnview)
     .build();
