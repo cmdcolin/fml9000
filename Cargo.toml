@@ -9,8 +9,6 @@ edition = "2021"
 symphonia = { version = "0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
 notify = "4"
 gtk = { version = "0.4", package = "gtk4" }
-dotenvy = "0.15"
 rusqlite = { version = "0.28", features = ["bundled"] }
 lofty = "0.8"
 walkdir = "2"
-rayon ="1"
