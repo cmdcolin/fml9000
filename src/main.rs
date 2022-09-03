@@ -68,7 +68,7 @@ fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> 
   Ok(conn)
 }
 
-fn process_file<'a>(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error> {
+fn process_file(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error> {
   let tagged_file = Probe::open(path)
     .expect("ERROR: Bad path provided!")
     .read(true);
