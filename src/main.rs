@@ -28,29 +28,15 @@ struct DbTrack<'a> {
 }
 
 fn main() {
-  match init_db() {
-    Ok(conn) => {
-      println!("initialized");
-
-      match print_db(&conn) {
-        Ok(_) => {
-          println!("printed");
-        }
-        Err(e) => {
-          println!("{}", e);
-        }
-      }
-    }
-    Err(e) => {
-      println!("{}", e);
-    }
-  }
+  let app = gtk::Application::new(Some("com.github.fml9001"), Default::default());
+  app.connect_activate(build_ui);
+  app.run();
 }
 
 fn connect_db() -> Result<Connection, rusqlite::Error> {
   let conn = Connection::open_with_flags("test.db", rusqlite::OpenFlags::default())?;
 
-  conn.execute(
+  match conn.execute(
     "CREATE TABLE tracks (
         id INTEGER NOT NULL PRIMARY KEY,
         filename VARCHAR NOT NULL,
@@ -59,8 +45,15 @@ fn connect_db() -> Result<Connection, rusqlite::Error> {
         album VARCHAR,
         album_artist VARCHAR
       )",
-    (), // empty list of parameters.
-  )?;
+    (),
+  ) {
+    Ok(_) => {
+      println!("Created new DB")
+    }
+    Err(e) => {
+      println!("{}", e)
+    }
+  }
 
   Ok(conn)
 }
@@ -110,7 +103,7 @@ where
   }
 }
 
-fn process_file<'a>(path: &str) -> Result<(), rusqlite::Error> {
+fn process_file<'a>(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error> {
   let tagged_file = Probe::open(path)
     .expect("ERROR: Bad path provided!")
     .read(true);
@@ -135,10 +128,10 @@ fn process_file<'a>(path: &str) -> Result<(), rusqlite::Error> {
             tag.artist().unwrap_or("None"),
             tag.album().unwrap_or("None")
           );
-          // tx.execute(
-          //   "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
-          //   (&path, &s.artist, &s.album, &s.album_artist, &s.title),
-          // )?;
+          tx.execute(
+            "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&path, &s.artist, &s.album, &s.album_artist, &s.title),
+          )?;
 
           Ok(())
         }
@@ -152,7 +145,7 @@ fn process_file<'a>(path: &str) -> Result<(), rusqlite::Error> {
 fn init_db() -> Result<Connection, rusqlite::Error> {
   let mut conn = connect_db()?;
   let mut i = 0;
-  let transaction_size = 10000;
+  let transaction_size = 20;
 
   for chunk in ChunkedIterator::new(
     WalkDir::new("/home/cdiesh/Music")
@@ -160,16 +153,16 @@ fn init_db() -> Result<Connection, rusqlite::Error> {
       .filter_map(|e| e.ok()),
     transaction_size,
   ) {
-    // let tx = conn.transaction()?;
+    let tx = conn.transaction()?;
     for file in chunk {
       if file.file_type().is_file() && i < 10000 {
         let path = file.path();
-        process_file(&path.display().to_string())?;
+        process_file(&tx, &path.display().to_string())?;
         i = i + 1;
-        println!("{} {}", i, path.display());
       }
     }
-    // tx.commit()?
+    println!("Transaction");
+    tx.commit()?
   }
   Ok(conn)
 }
@@ -206,7 +199,6 @@ fn build_ui(application: &gtk::Application) {
     .application(application)
     .title("fml9000")
     .build();
-
   match init_db() {
     Ok(conn) => {
       println!("initialized");
