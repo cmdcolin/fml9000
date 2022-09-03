@@ -9,7 +9,7 @@ use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
 use rusqlite::{Connection, Result, Transaction};
 use std::cell::Ref;
-use std::fs;
+use std::thread;
 use walkdir::WalkDir;
 
 struct Track {
@@ -33,8 +33,8 @@ fn main() {
   app.run();
 }
 
-fn connect_db() -> Result<Connection, rusqlite::Error> {
-  let conn = Connection::open_with_flags("test.db", rusqlite::OpenFlags::default())?;
+fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> {
+  let conn = Connection::open_with_flags("test.db", args)?;
 
   match conn.execute(
     "CREATE TABLE tracks (
@@ -123,11 +123,7 @@ fn process_file<'a>(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error>
             title: tag.title(),
             filename: path,
           };
-          println!(
-            "{} {}",
-            tag.artist().unwrap_or("None"),
-            tag.album().unwrap_or("None")
-          );
+
           tx.execute(
             "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
             (&path, &s.artist, &s.album, &s.album_artist, &s.title),
@@ -143,7 +139,7 @@ fn process_file<'a>(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error>
 }
 
 fn init_db() -> Result<Connection, rusqlite::Error> {
-  let mut conn = connect_db()?;
+  let mut conn = connect_db(rusqlite::OpenFlags::default())?;
   let mut i = 0;
   let transaction_size = 20;
 
@@ -161,35 +157,40 @@ fn init_db() -> Result<Connection, rusqlite::Error> {
         i = i + 1;
       }
     }
-    println!("Transaction");
     tx.commit()?
   }
   Ok(conn)
 }
 
-#[derive(Debug)]
-struct Temp {
-  filename: String,
-  title: String,
-}
-
-fn print_db(conn: &Connection) -> Result<(), rusqlite::Error> {
-  let mut stmt = conn.prepare("SELECT filename,title FROM tracks")?;
-  let track_iter = stmt.query_map([], |row| {
-    Ok(Temp {
+fn load_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
+  let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+  let mut stmt = conn.prepare("SELECT filename,title,artist,album_artist,album FROM tracks")?;
+  let rows = stmt.query_map([], |row| {
+    Ok(Track {
       filename: row.get(0)?,
       title: row.get(1)?,
+      artist: row.get(2)?,
+      album_artist: row.get(3)?,
+      album: row.get(4)?,
     })
   })?;
 
-  for track in track_iter {
-    match track {
-      Ok(t) => println!("Found track {:?}", t),
-      Err(e) => println!("{}", e),
-    }
+  for t in rows {
+    store.append(&BoxedAnyObject::new(t))
   }
 
   Ok(())
+}
+
+fn run_scan() {
+  thread::spawn(|| match init_db() {
+    Ok(conn) => {
+      println!("initialized");
+    }
+    Err(e) => {
+      println!("{}", e);
+    }
+  });
 }
 
 fn build_ui(application: &gtk::Application) {
@@ -199,23 +200,8 @@ fn build_ui(application: &gtk::Application) {
     .application(application)
     .title("fml9000")
     .build();
-  match init_db() {
-    Ok(conn) => {
-      println!("initialized");
 
-      match print_db(&conn) {
-        Ok(_) => {
-          println!("printed");
-        }
-        Err(e) => {
-          println!("{}", e);
-        }
-      }
-    }
-    Err(e) => {
-      println!("{}", e);
-    }
-  }
+  // run_scan();
 
   let grid = gtk::Grid::builder().hexpand(true).vexpand(true).build();
 
@@ -249,6 +235,8 @@ fn build_ui(application: &gtk::Application) {
   playlist_columnview.append_column(&playlist_col3);
   facet_columnview.append_column(&facet_col);
   playlist_manager_columnview.append_column(&playlist_manager_col);
+
+  load_db(&playlist_store);
 
   facet.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
