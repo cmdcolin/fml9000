@@ -5,10 +5,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 
-use lazy_static::lazy_static;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::{Error, Result};
 use symphonia::core::formats::{Cue, FormatOptions, FormatReader, SeekMode, SeekTo, Track};
@@ -47,25 +45,19 @@ pub fn play_track(path_str: &str) {
 
   // Use the default options for format readers other than for gapless playback.
   let format_opts = FormatOptions {
-    enable_gapless: !matches.is_present("no-gapless"),
+    enable_gapless: true,
     ..Default::default()
   };
 
   // Use the default options for metadata readers.
   let metadata_opts: MetadataOptions = Default::default();
 
-  // Get the value of the track option, if provided.
-  let track = match matches.value_of("track") {
-    Some(track_str) => track_str.parse::<usize>().ok(),
-    _ => None,
-  };
-
-  let no_progress = matches.is_present("no-progress");
+  let no_progress = true;
 
   // Probe the media source stream for metadata and get the format reader.
   match symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts) {
     Ok(mut probed) => {
-      let result = if matches.is_present("verify-only") {
+      let result = if false {
         // Verify-only mode decodes and verifies the audio, but does not play it.
         decode_only(
           probed.format,
@@ -74,7 +66,7 @@ pub fn play_track(path_str: &str) {
             ..Default::default()
           },
         )
-      } else if matches.is_present("decode-only") {
+      } else if false {
         // Decode-only mode decodes the audio, but does not play or verify it.
         decode_only(
           probed.format,
@@ -83,7 +75,7 @@ pub fn play_track(path_str: &str) {
             ..Default::default()
           },
         )
-      } else if matches.is_present("probe-only") {
+      } else if false {
         // Probe-only mode only prints information about the format, tracks, metadata, etc.
         print_format(path_str, &mut probed);
         Ok(())
@@ -92,13 +84,12 @@ pub fn play_track(path_str: &str) {
         print_format(path_str, &mut probed);
 
         // If present, parse the seek argument.
-        let seek_time = matches
-          .value_of("seek")
-          .map(|p| p.parse::<f64>().unwrap_or(0.0));
+        let seek_time = Some(0.0);
+        let track = Some(0);
 
         // Set the decoder options.
         let decode_opts = DecoderOptions {
-          verify: matches.is_present("verify"),
+          verify: false,
           ..Default::default()
         };
 
