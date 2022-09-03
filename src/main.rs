@@ -1,3 +1,4 @@
+mod chunked_iterator;
 mod grid_cell;
 
 use crate::grid_cell::Entry;
@@ -13,10 +14,10 @@ use std::thread;
 use walkdir::WalkDir;
 
 struct Track {
-  album_artist: String,
-  album: String,
-  artist: String,
-  title: String,
+  album_artist: Option<String>,
+  album: Option<String>,
+  artist: Option<String>,
+  title: Option<String>,
   filename: String,
 }
 struct DbTrack<'a> {
@@ -56,51 +57,6 @@ fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> 
   }
 
   Ok(conn)
-}
-
-struct ChunkedIterator<T, R>
-where
-  T: Iterator<Item = R>,
-{
-  source: T,
-  inner: Vec<R>,
-  size: usize,
-}
-impl<T, R> ChunkedIterator<T, R>
-where
-  T: Iterator<Item = R>,
-{
-  fn new(source: T, size: usize) -> Self {
-    ChunkedIterator {
-      size: size - 1,
-      inner: vec![],
-      source,
-    }
-  }
-}
-impl<T, R> Iterator for ChunkedIterator<T, R>
-where
-  T: Iterator<Item = R>,
-{
-  type Item = Vec<R>;
-
-  fn next(&mut self) -> Option<Vec<R>> {
-    while let inner_opt = self.source.next() {
-      match inner_opt {
-        Some(inner_item) => {
-          self.inner.push(inner_item);
-          if self.inner.len() > self.size {
-            return Some(self.inner.split_off(0));
-          }
-        }
-        None => match self.inner.len() {
-          0 => return None,
-          _ => return Some(self.inner.split_off(0)),
-        },
-      }
-    }
-    None
-  }
 }
 
 fn process_file<'a>(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error> {
@@ -143,7 +99,7 @@ fn init_db() -> Result<Connection, rusqlite::Error> {
   let mut i = 0;
   let transaction_size = 20;
 
-  for chunk in ChunkedIterator::new(
+  for chunk in chunked_iterator::ChunkedIterator::new(
     WalkDir::new("/home/cdiesh/Music")
       .into_iter()
       .filter_map(|e| e.ok()),
@@ -167,11 +123,11 @@ fn load_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
   let mut stmt = conn.prepare("SELECT filename,title,artist,album_artist,album FROM tracks")?;
   let rows = stmt.query_map([], |row| {
     Ok(Track {
-      filename: row.get(0),
-      title: row.get(1),
-      artist: row.get(2),
-      album_artist: row.get(3),
-      album: row.get(4),
+      filename: row.get(0)?,
+      title: row.get(1)?,
+      artist: row.get(2)?,
+      album_artist: row.get(3)?,
+      album: row.get(4)?,
     })
   })?;
 
@@ -227,9 +183,24 @@ fn build_ui(application: &gtk::Application) {
   let facet = gtk::SignalListItemFactory::new();
   let playlist_manager = gtk::SignalListItemFactory::new();
 
-  let playlist_col1 = gtk::ColumnViewColumn::new(Some("Artist / Album"), Some(&artistalbum));
-  let playlist_col2 = gtk::ColumnViewColumn::new(Some("Title"), Some(&title));
-  let playlist_col3 = gtk::ColumnViewColumn::new(Some("Filename"), Some(&filename));
+  let playlist_col1 = gtk::ColumnViewColumn::builder()
+    .resizable(true)
+    .title("Artist / Album")
+    .factory(&artistalbum)
+    .build();
+
+  let playlist_col2 = gtk::ColumnViewColumn::builder()
+    .resizable(true)
+    .title("Title")
+    .factory(&title)
+    .build();
+
+  let playlist_col3 = gtk::ColumnViewColumn::builder()
+    .resizable(true)
+    .title("Filename")
+    .factory(&filename)
+    .build();
+
   let facet_col = gtk::ColumnViewColumn::new(Some("X"), Some(&facet));
   let playlist_manager_col = gtk::ColumnViewColumn::new(Some("Playlists"), Some(&playlist_manager));
 
@@ -253,7 +224,11 @@ fn build_ui(application: &gtk::Application) {
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
-      name: format!("{} / {}", r.album_artist, r.album),
+      name: format!(
+        "{} / {}",
+        r.album_artist.as_ref().unwrap_or(&"".to_string()),
+        r.album.as_ref().unwrap_or(&"".to_string()),
+      ),
     };
     child.set_entry(&song);
   });
@@ -270,7 +245,11 @@ fn build_ui(application: &gtk::Application) {
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
-      name: format!("{} / {}", r.album, r.artist),
+      name: format!(
+        "{} / {}",
+        r.album.as_ref().unwrap_or(&"".to_string()),
+        r.artist.as_ref().unwrap_or(&"".to_string()),
+      ),
     };
     child.set_entry(&song);
   });
@@ -287,7 +266,7 @@ fn build_ui(application: &gtk::Application) {
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
-      name: r.title.to_string(),
+      name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     };
     child.set_entry(&song);
   });

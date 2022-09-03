@@ -1,4 +1,4 @@
-struct ChunkedIterator<T, R>
+pub struct ChunkedIterator<T, R>
 where
   T: Iterator<Item = R>,
 {
@@ -6,11 +6,12 @@ where
   inner: Vec<R>,
   size: usize,
 }
+
 impl<T, R> ChunkedIterator<T, R>
 where
   T: Iterator<Item = R>,
 {
-  fn new(source: T, size: usize) -> Self {
+  pub fn new(source: T, size: usize) -> Self {
     ChunkedIterator {
       size: size - 1,
       inner: vec![],
