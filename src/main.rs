@@ -20,6 +20,10 @@ struct Track {
   title: Option<String>,
   filename: String,
 }
+struct Facet {
+  album_artist: Option<String>,
+  album: Option<String>,
+}
 struct DbTrack<'a> {
   album_artist: Option<&'a str>,
   album: Option<&'a str>,
@@ -118,7 +122,7 @@ fn init_db() -> Result<Connection, rusqlite::Error> {
   Ok(conn)
 }
 
-fn load_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
+fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
   let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
   let mut stmt = conn.prepare("SELECT filename,title,artist,album_artist,album FROM tracks")?;
   let rows = stmt.query_map([], |row| {
@@ -128,6 +132,27 @@ fn load_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
       artist: row.get(2)?,
       album_artist: row.get(3)?,
       album: row.get(4)?,
+    })
+  })?;
+
+  for t in rows {
+    match t {
+      Ok(t) => store.append(&BoxedAnyObject::new(t)),
+      Err(e) => println!("{}", e),
+    }
+  }
+
+  Ok(())
+}
+
+fn load_facet_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
+  let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+  let mut stmt =
+    conn.prepare("SELECT DISTINCT album,album_artist FROM tracks ORDER BY album_artist")?;
+  let rows = stmt.query_map([], |row| {
+    Ok(Facet {
+      album: row.get(0)?,
+      album_artist: row.get(1)?,
     })
   })?;
 
@@ -208,7 +233,8 @@ fn build_ui(application: &gtk::Application) {
   facet_columnview.append_column(&facet_col);
   playlist_manager_columnview.append_column(&playlist_manager_col);
 
-  load_db(&playlist_store);
+  load_playlist_store_db(&playlist_store);
+  load_facet_db(&facet_store);
 
   facet.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
@@ -220,7 +246,7 @@ fn build_ui(application: &gtk::Application) {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = app_info.borrow();
+    let r: Ref<Facet> = app_info.borrow();
     let song = Entry {
       name: format!(
         "{} / {}",
@@ -286,17 +312,11 @@ fn build_ui(application: &gtk::Application) {
     child.set_entry(&song);
   });
 
-  let facet_window = gtk::ScrolledWindow::builder()
-    .min_content_height(390)
-    .build();
+  let facet_window = gtk::ScrolledWindow::builder().build();
 
-  let playlist_window = gtk::ScrolledWindow::builder()
-    .min_content_height(390)
-    .build();
+  let playlist_window = gtk::ScrolledWindow::builder().build();
 
-  let playlist_manager_window = gtk::ScrolledWindow::builder()
-    .min_content_height(390)
-    .build();
+  let playlist_manager_window = gtk::ScrolledWindow::builder().build();
 
   let album_art = gtk::Image::builder().file("/home/cdiesh/wow.png").build();
 
