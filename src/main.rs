@@ -167,16 +167,19 @@ fn load_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
   let mut stmt = conn.prepare("SELECT filename,title,artist,album_artist,album FROM tracks")?;
   let rows = stmt.query_map([], |row| {
     Ok(Track {
-      filename: row.get(0)?,
-      title: row.get(1)?,
-      artist: row.get(2)?,
-      album_artist: row.get(3)?,
-      album: row.get(4)?,
+      filename: row.get(0),
+      title: row.get(1),
+      artist: row.get(2),
+      album_artist: row.get(3),
+      album: row.get(4),
     })
   })?;
 
   for t in rows {
-    store.append(&BoxedAnyObject::new(t))
+    match t {
+      Ok(t) => store.append(&BoxedAnyObject::new(t)),
+      Err(e) => println!("{}", e),
+    }
   }
 
   Ok(())
