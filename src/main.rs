@@ -3,9 +3,13 @@ mod grid_cell;
 
 use crate::grid_cell::Entry;
 use crate::grid_cell::GridCell;
-use gtk::gio;
+use gdk::Display;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
+use gtk::{
+  gdk, gio, Application, ApplicationWindow, ColumnView, ColumnViewColumn, CssProvider, Image,
+  ListItem, Paned, ScrolledWindow, SignalListItemFactory, SingleSelection, StyleContext,
+};
 use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
 use rusqlite::{Connection, Result, Transaction};
@@ -33,7 +37,7 @@ struct DbTrack<'a> {
 }
 
 fn main() {
-  let app = gtk::Application::new(Some("com.github.fml9001"), Default::default());
+  let app = Application::new(Some("com.github.fml9001"), Default::default());
   app.connect_activate(build_ui);
   app.run();
 }
@@ -177,13 +181,31 @@ fn run_scan() {
   });
 }
 
-fn build_ui(application: &gtk::Application) {
-  let window = gtk::ApplicationWindow::builder()
+fn load_css() {
+  // Load the CSS file and add it to the provider
+  let provider = CssProvider::new();
+  provider.load_from_data(include_bytes!("style.css"));
+
+  // Add the provider to the default screen
+  StyleContext::add_provider_for_display(
+    &Display::default().expect("Could not connect to a display."),
+    &provider,
+    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+  );
+}
+
+fn build_ui(application: &Application) {
+  let provider = CssProvider::new();
+  provider.load_from_data(include_bytes!("style.css"));
+
+  let window = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
     .application(application)
     .title("fml9000")
     .build();
+
+  load_css();
 
   // run_scan();
 
@@ -191,44 +213,44 @@ fn build_ui(application: &gtk::Application) {
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
-  let playlist_sel = gtk::SingleSelection::new(Some(&playlist_store));
-  let playlist_columnview = gtk::ColumnView::new(Some(&playlist_sel));
+  let playlist_sel = SingleSelection::new(Some(&playlist_store));
+  let playlist_columnview = ColumnView::new(Some(&playlist_sel));
 
-  let facet_sel = gtk::SingleSelection::new(Some(&facet_store));
-  let facet_columnview = gtk::ColumnView::new(Some(&facet_sel));
+  let facet_sel = SingleSelection::new(Some(&facet_store));
+  let facet_columnview = ColumnView::new(Some(&facet_sel));
 
-  let playlist_manager_sel = gtk::SingleSelection::new(Some(&playlist_manager_store));
-  let playlist_manager_columnview = gtk::ColumnView::new(Some(&playlist_manager_sel));
+  let playlist_manager_sel = SingleSelection::new(Some(&playlist_manager_store));
+  let playlist_manager_columnview = ColumnView::new(Some(&playlist_manager_sel));
 
-  let artistalbum = gtk::SignalListItemFactory::new();
-  let title = gtk::SignalListItemFactory::new();
-  let filename = gtk::SignalListItemFactory::new();
-  let facet = gtk::SignalListItemFactory::new();
-  let playlist_manager = gtk::SignalListItemFactory::new();
+  let artistalbum = SignalListItemFactory::new();
+  let title = SignalListItemFactory::new();
+  let filename = SignalListItemFactory::new();
+  let facet = SignalListItemFactory::new();
+  let playlist_manager = SignalListItemFactory::new();
 
-  let playlist_col1 = gtk::ColumnViewColumn::builder()
+  let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
     .title("Artist / Album")
     .factory(&artistalbum)
     .build();
 
-  let playlist_col2 = gtk::ColumnViewColumn::builder()
+  let playlist_col2 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
     .title("Title")
     .factory(&title)
     .build();
 
-  let playlist_col3 = gtk::ColumnViewColumn::builder()
+  let playlist_col3 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
     .title("Filename")
     .factory(&filename)
     .build();
 
-  let facet_col = gtk::ColumnViewColumn::new(Some("X"), Some(&facet));
-  let playlist_manager_col = gtk::ColumnViewColumn::new(Some("Playlists"), Some(&playlist_manager));
+  let facet_col = ColumnViewColumn::new(Some("X"), Some(&facet));
+  let playlist_manager_col = ColumnViewColumn::new(Some("Playlists"), Some(&playlist_manager));
 
   playlist_columnview.append_column(&playlist_col1);
   playlist_columnview.append_column(&playlist_col2);
@@ -240,13 +262,13 @@ fn build_ui(application: &gtk::Application) {
   load_facet_db(&facet_store);
 
   facet.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   facet.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Facet> = app_info.borrow();
@@ -261,13 +283,13 @@ fn build_ui(application: &gtk::Application) {
   });
 
   artistalbum.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   artistalbum.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
@@ -282,13 +304,13 @@ fn build_ui(application: &gtk::Application) {
   });
 
   title.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   title.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
@@ -299,13 +321,13 @@ fn build_ui(application: &gtk::Application) {
   });
 
   filename.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   filename.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
@@ -315,27 +337,27 @@ fn build_ui(application: &gtk::Application) {
     child.set_entry(&song);
   });
 
-  let facet_window = gtk::ScrolledWindow::builder().build();
-  let playlist_window = gtk::ScrolledWindow::builder().build();
-  let playlist_manager_window = gtk::ScrolledWindow::builder().build();
+  let facet_window = ScrolledWindow::builder().build();
+  let playlist_window = ScrolledWindow::builder().build();
+  let playlist_manager_window = ScrolledWindow::builder().build();
 
-  let album_art = gtk::Image::builder().file("/home/cdiesh/wow.png").build();
+  let album_art = Image::builder().file("/home/cdiesh/wow.png").build();
 
   facet_window.set_child(Some(&facet_columnview));
   playlist_window.set_child(Some(&playlist_columnview));
   playlist_manager_window.set_child(Some(&playlist_manager_columnview));
 
-  let lrpane = gtk::Paned::builder()
+  let lrpane = Paned::builder()
     .hexpand(true)
     .orientation(gtk::Orientation::Horizontal)
     .build();
 
-  let ltopbottom = gtk::Paned::builder()
+  let ltopbottom = Paned::builder()
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
     .build();
 
-  let rtopbottom = gtk::Paned::builder()
+  let rtopbottom = Paned::builder()
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
     .build();
