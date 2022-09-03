@@ -1,7 +1,7 @@
-mod application_row;
+mod grid_cell;
 
-use crate::application_row::ApplicationRow;
-use crate::application_row::Entry;
+use crate::grid_cell::Entry;
+use crate::grid_cell::GridCell;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
@@ -240,13 +240,13 @@ fn build_ui(application: &gtk::Application) {
 
   facet.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let row = ApplicationRow::new();
+    let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   facet.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
@@ -257,13 +257,13 @@ fn build_ui(application: &gtk::Application) {
 
   artistalbum.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let row = ApplicationRow::new();
+    let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   artistalbum.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
@@ -274,13 +274,13 @@ fn build_ui(application: &gtk::Application) {
 
   title.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let row = ApplicationRow::new();
+    let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   title.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
@@ -291,13 +291,13 @@ fn build_ui(application: &gtk::Application) {
 
   filename.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let row = ApplicationRow::new();
+    let row = GridCell::new();
     item.set_child(Some(&row));
   });
 
   filename.connect_bind(move |_factory, item| {
     let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<ApplicationRow>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let app_info = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let r: Ref<Track> = app_info.borrow();
     let song = Entry {
