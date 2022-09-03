@@ -288,16 +288,13 @@ fn build_ui(application: &gtk::Application) {
 
   let facet_window = gtk::ScrolledWindow::builder()
     .min_content_height(390)
-    .min_content_width(600)
     .build();
 
   let playlist_window = gtk::ScrolledWindow::builder()
     .min_content_height(390)
-    .min_content_width(600)
     .build();
 
   let playlist_manager_window = gtk::ScrolledWindow::builder()
-    .min_content_width(600)
     .min_content_height(390)
     .build();
 
@@ -307,9 +304,21 @@ fn build_ui(application: &gtk::Application) {
   playlist_window.set_child(Some(&playlist_columnview));
   playlist_manager_window.set_child(Some(&playlist_manager_columnview));
 
-  let lrpane = gtk::Paned::new(gtk::Orientation::Horizontal);
-  let ltopbottom = gtk::Paned::new(gtk::Orientation::Vertical);
-  let rtopbottom = gtk::Paned::new(gtk::Orientation::Vertical);
+  let lrpane = gtk::Paned::builder()
+    .hexpand(true)
+    .orientation(gtk::Orientation::Horizontal)
+    .build();
+
+  let ltopbottom = gtk::Paned::builder()
+    .vexpand(true)
+    .orientation(gtk::Orientation::Vertical)
+    .build();
+
+  let rtopbottom = gtk::Paned::builder()
+    .vexpand(true)
+    .orientation(gtk::Orientation::Vertical)
+    .build();
+
   ltopbottom.set_start_child(Some(&facet_window));
   ltopbottom.set_end_child(Some(&playlist_window));
   rtopbottom.set_start_child(Some(&playlist_manager_window));
