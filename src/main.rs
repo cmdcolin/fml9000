@@ -213,14 +213,17 @@ fn build_ui(application: &Application) {
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
-  let playlist_sel = SingleSelection::new(Some(&playlist_store));
-  let playlist_columnview = ColumnView::new(Some(&playlist_sel));
+  let playlist_sel = SingleSelection::builder().model(&playlist_store).build();
+  let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
 
-  let facet_sel = SingleSelection::new(Some(&facet_store));
-  let facet_columnview = ColumnView::new(Some(&facet_sel));
+  let facet_sel = SingleSelection::builder().model(&facet_store).build();
+  let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
-  let playlist_manager_sel = SingleSelection::new(Some(&playlist_manager_store));
-  let playlist_manager_columnview = ColumnView::new(Some(&playlist_manager_sel));
+  let playlist_manager_sel = SingleSelection::builder()
+    .model(&playlist_manager_store)
+    .build();
+
+  let playlist_manager_columnview = ColumnView::builder().model(&playlist_manager_sel).build();
 
   let artistalbum = SignalListItemFactory::new();
   let title = SignalListItemFactory::new();
@@ -249,8 +252,15 @@ fn build_ui(application: &Application) {
     .factory(&filename)
     .build();
 
-  let facet_col = ColumnViewColumn::new(Some("X"), Some(&facet));
-  let playlist_manager_col = ColumnViewColumn::new(Some("Playlists"), Some(&playlist_manager));
+  let facet_col = ColumnViewColumn::builder()
+    .title("X")
+    .factory(&facet)
+    .build();
+
+  let playlist_manager_col = ColumnViewColumn::builder()
+    .title("Playlist")
+    .factory(&playlist_manager)
+    .build();
 
   playlist_columnview.append_column(&playlist_col1);
   playlist_columnview.append_column(&playlist_col2);
@@ -337,37 +347,36 @@ fn build_ui(application: &Application) {
     child.set_entry(&song);
   });
 
-  let facet_window = ScrolledWindow::builder().build();
-  let playlist_window = ScrolledWindow::builder().build();
-  let playlist_manager_window = ScrolledWindow::builder().build();
+  let facet_window = ScrolledWindow::builder().child(&facet_columnview).build();
+  let playlist_window = ScrolledWindow::builder()
+    .child(&playlist_columnview)
+    .build();
+  let playlist_manager_window = ScrolledWindow::builder()
+    .child(&playlist_manager_columnview)
+    .build();
 
   let album_art = Image::builder().file("/home/cdiesh/wow.png").build();
-
-  facet_window.set_child(Some(&facet_columnview));
-  playlist_window.set_child(Some(&playlist_columnview));
-  playlist_manager_window.set_child(Some(&playlist_manager_columnview));
-
-  let lrpane = Paned::builder()
-    .hexpand(true)
-    .orientation(gtk::Orientation::Horizontal)
-    .build();
 
   let ltopbottom = Paned::builder()
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
+    .start_child(&facet_window)
+    .end_child(&playlist_window)
     .build();
 
   let rtopbottom = Paned::builder()
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
+    .start_child(&playlist_manager_window)
+    .end_child(&album_art)
     .build();
 
-  ltopbottom.set_start_child(Some(&facet_window));
-  ltopbottom.set_end_child(Some(&playlist_window));
-  rtopbottom.set_start_child(Some(&playlist_manager_window));
-  rtopbottom.set_end_child(Some(&album_art));
-  lrpane.set_start_child(Some(&ltopbottom));
-  lrpane.set_end_child(Some(&rtopbottom));
+  let lrpane = Paned::builder()
+    .hexpand(true)
+    .orientation(gtk::Orientation::Horizontal)
+    .start_child(&ltopbottom)
+    .end_child(&rtopbottom)
+    .build();
 
   window.set_child(Some(&lrpane));
   window.show();
