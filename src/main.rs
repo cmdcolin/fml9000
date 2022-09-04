@@ -464,12 +464,14 @@ fn build_ui(application: &Application) {
 extern crate time_test;
 #[cfg(test)]
 mod tests {
+  use crate::load_facet_db;
   use crate::load_playlist_store_db;
   use gtk::gio;
   use gtk::glib::BoxedAnyObject;
   use gtk::prelude::*;
+
   #[test]
-  fn it_works() {
+  fn load_playlist_store() {
     time_test!();
     let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
     match load_playlist_store_db(&playlist_store) {
@@ -478,5 +480,17 @@ mod tests {
     };
     println!("{}", playlist_store.n_items());
     assert_eq!(playlist_store.n_items(), 30940);
+  }
+
+  #[test]
+  fn load_facet() {
+    time_test!();
+    let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
+    match load_facet_db(&playlist_store) {
+      Ok(_) => println!("h1"),
+      Err(e) => println!("{}", e),
+    };
+    println!("{}", playlist_store.n_items());
+    assert_eq!(playlist_store.n_items(), 1272);
   }
 }
