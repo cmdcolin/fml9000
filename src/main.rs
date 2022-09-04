@@ -9,7 +9,7 @@ use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
   gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, CssProvider,
-  Image, ListItem, Paned, Scale, ScrolledWindow, SignalListItemFactory, SingleSelection,
+  Image, ListItem, Paned, Scale, ScrolledWindow, SignalListItemFactory, SingleSelection, Statusbar,
   StyleContext,
 };
 use lofty::ItemKey::AlbumArtist;
@@ -282,7 +282,6 @@ fn build_ui(application: &Application) {
       .downcast::<BoxedAnyObject>()
       .unwrap();
     let r: Ref<Track> = item.borrow();
-    println!("{}", r.filename);
     let f = r.filename.clone();
     thread::spawn(move || play_track::play_track(&f));
   });
@@ -453,9 +452,12 @@ fn build_ui(application: &Application) {
   button_box.append(&stop_btn);
   button_box.append(&seek_slider);
   button_box.append(&volume_slider);
+
+  let statusbar = Statusbar::new();
   let main_ui = Box::new(gtk::Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
+  main_ui.append(&statusbar);
   window.set_child(Some(&main_ui));
   window.show();
 }
