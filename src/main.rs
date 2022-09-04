@@ -5,6 +5,8 @@ mod play_track;
 use crate::grid_cell::Entry;
 use crate::grid_cell::GridCell;
 use gdk::Display;
+use gtk::glib;
+use gtk::glib::closure_local;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
@@ -12,13 +14,15 @@ use gtk::{
   Image, ListItem, Paned, Scale, ScrolledWindow, SignalListItemFactory, SingleSelection, Statusbar,
   StyleContext,
 };
-use lofty::ItemKey::AlbumArtist;
-use lofty::{Accessor, Probe};
+use lofty::{Accessor, ItemKey, Probe};
 use rusqlite::{Connection, Result, Transaction};
 use std::cell::Ref;
 use std::thread;
 use walkdir::WalkDir;
 
+struct Playlist {
+  name: String,
+}
 struct Track {
   album_artist: Option<String>,
   album: Option<String>,
@@ -83,7 +87,7 @@ fn process_file(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error> {
       match tag {
         Some(tag) => {
           let s = DbTrack {
-            album_artist: tag.get_string(&AlbumArtist),
+            album_artist: tag.get_string(&ItemKey::AlbumArtist),
             artist: tag.artist(),
             album: tag.album(),
             title: tag.title(),
@@ -288,6 +292,12 @@ fn build_ui(application: &Application) {
 
   load_playlist_store_db(&playlist_store);
   load_facet_db(&facet_store);
+  playlist_manager_store.append(&BoxedAnyObject::new(Playlist {
+    name: "Recently added".to_string(),
+  }));
+  playlist_manager_store.append(&BoxedAnyObject::new(Playlist {
+    name: "Recently played".to_string(),
+  }));
 
   facet.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<ListItem>().unwrap();
@@ -452,6 +462,15 @@ fn build_ui(application: &Application) {
   button_box.append(&stop_btn);
   button_box.append(&seek_slider);
   button_box.append(&volume_slider);
+
+  pause_btn.connect_closure(
+    "clicked",
+    false,
+    closure_local!(move |button: Button| {
+      // Set the label to "Hello World!" after the button has been clicked on
+      button.set_label("Hello World!");
+    }),
+  );
 
   let statusbar = Statusbar::new();
   let main_ui = Box::new(gtk::Orientation::Vertical, 0);
