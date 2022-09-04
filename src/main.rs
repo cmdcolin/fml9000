@@ -8,8 +8,9 @@ use gdk::Display;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  gdk, gio, Application, ApplicationWindow, ColumnView, ColumnViewColumn, CssProvider, Image,
-  ListItem, Paned, ScrolledWindow, SignalListItemFactory, SingleSelection, StyleContext,
+  gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, CssProvider,
+  Image, ListItem, Paned, Scale, ScrolledWindow, SignalListItemFactory, SingleSelection,
+  StyleContext,
 };
 use lofty::ItemKey::AlbumArtist;
 use lofty::{Accessor, Probe};
@@ -235,6 +236,7 @@ fn build_ui(application: &Application) {
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
+    .fixed_width(400)
     .title("Artist / Album")
     .factory(&artistalbum)
     .build();
@@ -243,12 +245,14 @@ fn build_ui(application: &Application) {
     .expand(false)
     .resizable(true)
     .title("Title")
+    .fixed_width(300)
     .factory(&title)
     .build();
 
   let playlist_col3 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
+    .fixed_width(200)
     .title("Filename")
     .factory(&filename)
     .build();
@@ -256,6 +260,7 @@ fn build_ui(application: &Application) {
   let facet_col = ColumnViewColumn::builder()
     .title("X")
     .factory(&facet)
+    .expand(true)
     .build();
 
   let playlist_manager_col = ColumnViewColumn::builder()
@@ -390,6 +395,67 @@ fn build_ui(application: &Application) {
     .end_child(&rtopbottom)
     .build();
 
-  window.set_child(Some(&lrpane));
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(include_bytes!("img/play.svg")).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let play_img = Image::new();
+  play_img.set_from_pixbuf(Some(&pixbuf));
+
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(include_bytes!("img/pause.svg")).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let pause_img = Image::new();
+  pause_img.set_from_pixbuf(Some(&pixbuf));
+
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(include_bytes!("img/next.svg")).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let next_img = Image::new();
+  next_img.set_from_pixbuf(Some(&pixbuf));
+
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(include_bytes!("img/prev.svg")).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let prev_img = Image::new();
+  prev_img.set_from_pixbuf(Some(&pixbuf));
+
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(include_bytes!("img/stop.svg")).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let stop_img = Image::new();
+  stop_img.set_from_pixbuf(Some(&pixbuf));
+
+  let play_btn = Button::builder().child(&play_img).build();
+  let pause_btn = Button::builder().child(&pause_img).build();
+  let next_btn = Button::builder().child(&next_img).build();
+  let prev_btn = Button::builder().child(&prev_img).build();
+  let stop_btn = Button::builder().child(&stop_img).build();
+  let button_box = Box::new(gtk::Orientation::Horizontal, 0);
+  let seek_slider = Scale::new(
+    gtk::Orientation::Horizontal,
+    Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
+  );
+  let volume_slider = Scale::new(
+    gtk::Orientation::Horizontal,
+    Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
+  );
+  seek_slider.set_hexpand(true);
+  volume_slider.set_width_request(200);
+  button_box.append(&play_btn);
+  button_box.append(&pause_btn);
+  button_box.append(&prev_btn);
+  button_box.append(&next_btn);
+  button_box.append(&stop_btn);
+  button_box.append(&seek_slider);
+  button_box.append(&volume_slider);
+  let main_ui = Box::new(gtk::Orientation::Vertical, 0);
+  main_ui.append(&button_box);
+  main_ui.append(&lrpane);
+  window.set_child(Some(&main_ui));
   window.show();
 }
