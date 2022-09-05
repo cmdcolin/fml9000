@@ -19,7 +19,7 @@ use log::{error, info, warn};
 
 mod output;
 
-pub fn play_track(path_str: &str) {
+pub fn play_track(path_str: String) {
   // Create a hint to help the format registry guess what format reader is appropriate.
   let mut hint = Hint::new();
 
@@ -28,7 +28,7 @@ pub fn play_track(path_str: &str) {
     Box::new(ReadOnlySource::new(std::io::stdin())) as Box<dyn MediaSource>
   } else {
     // Othwerise, get a Path from the path string.
-    let path = Path::new(path_str);
+    let path = Path::new(&path_str);
 
     // Provide the file extension as a hint.
     if let Some(extension) = path.extension() {
@@ -77,11 +77,11 @@ pub fn play_track(path_str: &str) {
         )
       } else if false {
         // Probe-only mode only prints information about the format, tracks, metadata, etc.
-        print_format(path_str, &mut probed);
+        print_format(&path_str, &mut probed);
         Ok(())
       } else {
         // Playback mode.
-        print_format(path_str, &mut probed);
+        print_format(&path_str, &mut probed);
 
         // If present, parse the seek argument.
         let seek_time = Some(0.0);

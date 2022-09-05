@@ -11,11 +11,11 @@ use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
   gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, Image,
-  ListItem, MediaFile, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory,
-  SingleSelection, VolumeButton,
+  ListItem, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory, SingleSelection,
+  VolumeButton,
 };
-
 use std::cell::Ref;
+use std::sync::mpsc;
 use std::thread;
 
 struct Playlist {
@@ -24,11 +24,21 @@ struct Playlist {
 
 fn main() {
   let app = Application::new(Some("com.github.fml9000"), Default::default());
-  app.connect_activate(build_ui);
+
+  app.connect_activate(app_main);
   app.run();
 }
 
-fn build_ui(application: &Application) {
+fn app_main(application: &Application) {
+  let (tx, rx) = mpsc::channel();
+  let thread = thread::Builder::new()
+    .name("music_player_thread".to_string())
+    .spawn(move || {
+      let received = rx.recv().unwrap();
+      println!("{}", received);
+      play_track::play_track(received);
+    });
+
   let window = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -110,7 +120,7 @@ fn build_ui(application: &Application) {
   facet_columnview.append_column(&facet_col);
   playlist_manager_columnview.append_column(&playlist_manager_col);
 
-  playlist_columnview.connect_activate(|columnview, position| {
+  playlist_columnview.connect_activate(move |columnview, position| {
     let model = columnview.model().unwrap();
     let item = model
       .item(position)
@@ -119,11 +129,7 @@ fn build_ui(application: &Application) {
       .unwrap();
     let r: Ref<database::Track> = item.borrow();
     let f = r.filename.clone();
-    thread::spawn(move || play_track::play_track(&f));
-
-    // let media = MediaFile::new();
-    // media.set_filename(Some(f));
-    // media.play();
+    tx.send(f.to_string());
   });
 
   database::load_playlist_store_db(&playlist_store);
