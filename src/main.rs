@@ -12,7 +12,7 @@ use gtk::prelude::*;
 use gtk::{
   gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, CssProvider,
   Image, ListItem, Paned, Scale, ScrolledWindow, SignalListItemFactory, SingleSelection, Statusbar,
-  StyleContext,
+  StyleContext, VolumeButton,
 };
 use lofty::{Accessor, ItemKey, Probe};
 use rusqlite::{Connection, Result, Transaction};
@@ -449,12 +449,8 @@ fn build_ui(application: &Application) {
     gtk::Orientation::Horizontal,
     Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
   );
-  let volume_slider = Scale::new(
-    gtk::Orientation::Horizontal,
-    Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
-  );
+  let volume_slider = VolumeButton::new();
   seek_slider.set_hexpand(true);
-  volume_slider.set_width_request(200);
   button_box.append(&play_btn);
   button_box.append(&pause_btn);
   button_box.append(&prev_btn);
