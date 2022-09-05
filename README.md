@@ -1,14 +1,6 @@
 ## fml9000
 
-## Goals
-
-- foobar2000 style default UI look
-- "recently played" playlist
-- "recently added" playlist
-
-## Current status
-
-Struggling to understand both rust and gtk
+A music player written in Rust with GTK4-rs
 
 ## Usage
 
@@ -18,10 +10,10 @@ cd fml9000
 cargo run
 ```
 
-## Notes
+## Troubleshooting
 
-Usage with Linuxbrew may not work, I completely uninstalled linuxbrew to make
-the development work on my computer. See
+Usage with Linuxbrew may not work, I had to completely uninstall linuxbrew to
+make the development work on my computer. See
 https://github.com/tauri-apps/tauri/issues/3856
 
 ## License

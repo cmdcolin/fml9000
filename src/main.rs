@@ -43,7 +43,7 @@ struct DbTrack<'a> {
 }
 
 fn main() {
-  let app = Application::new(Some("com.github.fml9001"), Default::default());
+  let app = Application::new(Some("com.github.fml9000"), Default::default());
   app.connect_activate(build_ui);
   app.run();
 }
