@@ -1,45 +1,25 @@
-mod chunked_iterator;
+mod database;
 mod grid_cell;
+mod load_css;
 mod play_track;
 
 use crate::grid_cell::Entry;
 use crate::grid_cell::GridCell;
-use gdk::Display;
 use gtk::glib;
 use gtk::glib::closure_local;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, CssProvider,
-  Image, ListItem, Paned, Scale, ScrolledWindow, SignalListItemFactory, SingleSelection, Statusbar,
-  StyleContext, VolumeButton,
+  gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, Image,
+  ListItem, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory, SingleSelection,
+  VolumeButton,
 };
-use lofty::{Accessor, ItemKey, Probe};
-use rusqlite::{Connection, Result, Transaction};
+
 use std::cell::Ref;
 use std::thread;
-use walkdir::WalkDir;
 
 struct Playlist {
   name: String,
-}
-struct Track {
-  album_artist: Option<String>,
-  album: Option<String>,
-  artist: Option<String>,
-  title: Option<String>,
-  filename: String,
-}
-struct Facet {
-  album_artist: Option<String>,
-  album: Option<String>,
-}
-struct DbTrack<'a> {
-  album_artist: Option<&'a str>,
-  album: Option<&'a str>,
-  artist: Option<&'a str>,
-  title: Option<&'a str>,
-  filename: &'a str,
 }
 
 fn main() {
@@ -48,162 +28,7 @@ fn main() {
   app.run();
 }
 
-fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> {
-  let conn = Connection::open_with_flags("test.db", args)?;
-
-  match conn.execute(
-    "CREATE TABLE tracks (
-        id INTEGER NOT NULL PRIMARY KEY,
-        filename VARCHAR NOT NULL,
-        title VARCHAR,
-        artist VARCHAR,
-        album VARCHAR,
-        album_artist VARCHAR
-      )",
-    (),
-  ) {
-    Ok(_) => {
-      println!("Created new DB")
-    }
-    Err(e) => {
-      println!("{}", e)
-    }
-  }
-
-  Ok(conn)
-}
-
-fn process_file(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error> {
-  let tagged_file = Probe::open(path)
-    .expect("ERROR: Bad path provided!")
-    .read(true);
-  match tagged_file {
-    Ok(tagged_file) => {
-      let tag = match tagged_file.primary_tag() {
-        Some(primary_tag) => Some(primary_tag),
-        None => tagged_file.first_tag(),
-      };
-
-      match tag {
-        Some(tag) => {
-          let s = DbTrack {
-            album_artist: tag.get_string(&ItemKey::AlbumArtist),
-            artist: tag.artist(),
-            album: tag.album(),
-            title: tag.title(),
-            filename: path,
-          };
-
-          tx.execute(
-            "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&path, &s.artist, &s.album, &s.album_artist, &s.title),
-          )?;
-
-          Ok(())
-        }
-        None => Ok(()),
-      }
-    }
-    Err(_) => Ok(()),
-  }
-}
-
-fn init_db() -> Result<Connection, rusqlite::Error> {
-  let mut conn = connect_db(rusqlite::OpenFlags::default())?;
-  let mut i = 0;
-  let transaction_size = 20;
-
-  for chunk in chunked_iterator::ChunkedIterator::new(
-    WalkDir::new("/home/cdiesh/Music")
-      .into_iter()
-      .filter_map(|e| e.ok()),
-    transaction_size,
-  ) {
-    let tx = conn.transaction()?;
-    for file in chunk {
-      if file.file_type().is_file() && i < 10000 {
-        let path = file.path();
-        process_file(&tx, &path.display().to_string())?;
-        i = i + 1;
-      }
-    }
-    tx.commit()?
-  }
-  Ok(conn)
-}
-
-fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
-  let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-  let mut stmt = conn.prepare("SELECT filename,title,artist,album_artist,album FROM tracks")?;
-  let rows = stmt.query_map([], |row| {
-    Ok(Track {
-      filename: row.get(0)?,
-      title: row.get(1)?,
-      artist: row.get(2)?,
-      album_artist: row.get(3)?,
-      album: row.get(4)?,
-    })
-  })?;
-
-  for t in rows {
-    match t {
-      Ok(t) => store.append(&BoxedAnyObject::new(t)),
-      Err(e) => println!("{}", e),
-    }
-  }
-
-  Ok(())
-}
-
-fn load_facet_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
-  let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-  let mut stmt =
-    conn.prepare("SELECT DISTINCT album,album_artist FROM tracks ORDER BY album_artist")?;
-  let rows = stmt.query_map([], |row| {
-    Ok(Facet {
-      album: row.get(0)?,
-      album_artist: row.get(1)?,
-    })
-  })?;
-
-  for t in rows {
-    match t {
-      Ok(t) => store.append(&BoxedAnyObject::new(t)),
-      Err(e) => println!("{}", e),
-    }
-  }
-
-  Ok(())
-}
-
-fn run_scan() {
-  thread::spawn(|| match init_db() {
-    Ok(conn) => {
-      println!("initialized");
-    }
-    Err(e) => {
-      println!("{}", e);
-    }
-  });
-}
-
-fn load_css() {
-  // Load the CSS file and add it to the provider
-  let provider = CssProvider::new();
-  provider.load_from_data(include_bytes!("style.css"));
-
-  // Add the provider to the default screen
-  StyleContext::add_provider_for_display(
-    &Display::default().expect("Could not connect to a display."),
-    &provider,
-    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-  );
-}
-
 fn build_ui(application: &Application) {
-  let provider = CssProvider::new();
-  provider.load_from_data(include_bytes!("style.css"));
-
   let window = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -211,9 +36,7 @@ fn build_ui(application: &Application) {
     .title("fml9000")
     .build();
 
-  load_css();
-
-  // run_scan();
+  load_css::load_css();
 
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
@@ -268,8 +91,9 @@ fn build_ui(application: &Application) {
     .build();
 
   let playlist_manager_col = ColumnViewColumn::builder()
-    .title("Playlist")
+    .title("Playlists")
     .factory(&playlist_manager)
+    .expand(true)
     .build();
 
   playlist_columnview.append_column(&playlist_col1);
@@ -285,13 +109,13 @@ fn build_ui(application: &Application) {
       .unwrap()
       .downcast::<BoxedAnyObject>()
       .unwrap();
-    let r: Ref<Track> = item.borrow();
+    let r: Ref<database::Track> = item.borrow();
     let f = r.filename.clone();
     thread::spawn(move || play_track::play_track(&f));
   });
 
-  load_playlist_store_db(&playlist_store);
-  load_facet_db(&facet_store);
+  database::load_playlist_store_db(&playlist_store);
+  database::load_facet_db(&facet_store);
   playlist_manager_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -309,7 +133,7 @@ fn build_ui(application: &Application) {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Facet> = obj.borrow();
+    let r: Ref<database::Facet> = obj.borrow();
     child.set_entry(&Entry {
       name: format!(
         "{} / {}",
@@ -329,7 +153,7 @@ fn build_ui(application: &Application) {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<database::Track> = obj.borrow();
     child.set_entry(&Entry {
       name: format!(
         "{} / {}",
@@ -349,7 +173,7 @@ fn build_ui(application: &Application) {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<database::Track> = obj.borrow();
     child.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     });
@@ -365,13 +189,37 @@ fn build_ui(application: &Application) {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let child = item.child().unwrap().downcast::<GridCell>().unwrap();
     let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<database::Track> = obj.borrow();
     child.set_entry(&Entry {
       name: r.filename.to_string(),
     });
   });
 
-  let facet_window = ScrolledWindow::builder().child(&facet_columnview).build();
+  playlist_manager.connect_setup(move |_factory, item| {
+    let item = item.downcast_ref::<ListItem>().unwrap();
+    let row = GridCell::new();
+    item.set_child(Some(&row));
+  });
+
+  playlist_manager.connect_bind(move |_factory, item| {
+    let item = item.downcast_ref::<ListItem>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<Playlist> = obj.borrow();
+    child.set_entry(&Entry {
+      name: r.name.to_string(),
+    });
+  });
+
+  let facet_window = ScrolledWindow::builder()
+    .child(&facet_columnview)
+    .vexpand(true)
+    .build();
+
+  let facet_box = Box::new(gtk::Orientation::Vertical, 0);
+  let search_bar = SearchEntry::builder().build();
+  facet_box.append(&search_bar);
+  facet_box.append(&facet_window);
 
   let playlist_window = ScrolledWindow::builder()
     .child(&playlist_columnview)
@@ -386,7 +234,7 @@ fn build_ui(application: &Application) {
   let ltopbottom = Paned::builder()
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
-    .start_child(&facet_window)
+    .start_child(&facet_box)
     .end_child(&playlist_window)
     .build();
 
@@ -449,15 +297,16 @@ fn build_ui(application: &Application) {
     gtk::Orientation::Horizontal,
     Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
   );
-  let volume_slider = VolumeButton::new();
+  let volume_button = VolumeButton::new();
   seek_slider.set_hexpand(true);
+
+  button_box.append(&seek_slider);
   button_box.append(&play_btn);
   button_box.append(&pause_btn);
   button_box.append(&prev_btn);
   button_box.append(&next_btn);
   button_box.append(&stop_btn);
-  button_box.append(&seek_slider);
-  button_box.append(&volume_slider);
+  button_box.append(&volume_button);
 
   pause_btn.connect_closure(
     "clicked",
@@ -468,11 +317,9 @@ fn build_ui(application: &Application) {
     }),
   );
 
-  let statusbar = Statusbar::new();
   let main_ui = Box::new(gtk::Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
-  main_ui.append(&statusbar);
   window.set_child(Some(&main_ui));
   window.show();
 }
@@ -481,8 +328,8 @@ fn build_ui(application: &Application) {
 extern crate time_test;
 #[cfg(test)]
 mod tests {
-  use crate::load_facet_db;
-  use crate::load_playlist_store_db;
+  use crate::database::load_facet_db;
+  use crate::database::load_playlist_store_db;
   use gtk::gio;
   use gtk::glib::BoxedAnyObject;
   use gtk::prelude::*;
