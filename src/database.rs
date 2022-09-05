@@ -7,19 +7,13 @@ use rusqlite::{Connection, Result, Transaction};
 use std::thread;
 use walkdir::WalkDir;
 
-struct DbTrack<'a> {
-  album_artist: Option<&'a str>,
-  album: Option<&'a str>,
-  artist: Option<&'a str>,
-  title: Option<&'a str>,
-  filename: &'a str,
-}
-
 pub struct Track {
   pub album_artist: Option<String>,
   pub album: Option<String>,
   pub artist: Option<String>,
+  pub track: Option<String>,
   pub title: Option<String>,
+  pub genre: Option<String>,
   pub filename: String,
 }
 
@@ -37,7 +31,9 @@ pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Err
         filename VARCHAR NOT NULL,
         title VARCHAR,
         artist VARCHAR,
+        track VARCHAR,
         album VARCHAR,
+        genre VARCHAR,
         album_artist VARCHAR
       )",
     (),
@@ -66,17 +62,9 @@ pub fn process_file(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error>
 
       match tag {
         Some(tag) => {
-          let s = DbTrack {
-            album_artist: tag.get_string(&ItemKey::AlbumArtist),
-            artist: tag.artist(),
-            album: tag.album(),
-            title: tag.title(),
-            filename: path,
-          };
-
           tx.execute(
-            "INSERT INTO tracks (filename,artist,album,album_artist,title) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&path, &s.artist, &s.album, &s.album_artist, &s.title),
+            "INSERT INTO tracks (filename,track,artist,album,album_artist,title,genre) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (&path, tag.track(), tag.artist(), tag.album(), tag.get_string(&ItemKey::AlbumArtist), tag.title(),tag.genre()),
           )?;
 
           Ok(())
@@ -122,6 +110,8 @@ pub fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Er
       artist: row.get(2)?,
       album_artist: row.get(3)?,
       album: row.get(4)?,
+      genre: None,
+      track: None,
     })
   })?;
 

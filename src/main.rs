@@ -75,8 +75,15 @@ fn build_ui(application: &Application) {
     .fixed_width(300)
     .factory(&title)
     .build();
-
   let playlist_col3 = ColumnViewColumn::builder()
+    .expand(false)
+    .resizable(true)
+    .title("Track")
+    .fixed_width(20)
+    .factory(&title)
+    .build();
+
+  let playlist_col4 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
     .fixed_width(200)
