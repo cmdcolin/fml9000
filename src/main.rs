@@ -11,8 +11,8 @@ use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
   gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, Image,
-  ListItem, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory, SingleSelection,
-  VolumeButton,
+  ListItem, MediaFile, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory,
+  SingleSelection, VolumeButton,
 };
 
 use std::cell::Ref;
@@ -106,6 +106,7 @@ fn build_ui(application: &Application) {
   playlist_columnview.append_column(&playlist_col1);
   playlist_columnview.append_column(&playlist_col2);
   playlist_columnview.append_column(&playlist_col3);
+  playlist_columnview.append_column(&playlist_col4);
   facet_columnview.append_column(&facet_col);
   playlist_manager_columnview.append_column(&playlist_manager_col);
 
@@ -119,6 +120,10 @@ fn build_ui(application: &Application) {
     let r: Ref<database::Track> = item.borrow();
     let f = r.filename.clone();
     thread::spawn(move || play_track::play_track(&f));
+
+    // let media = MediaFile::new();
+    // media.set_filename(Some(f));
+    // media.play();
   });
 
   database::load_playlist_store_db(&playlist_store);
