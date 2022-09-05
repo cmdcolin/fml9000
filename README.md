@@ -23,3 +23,8 @@ cargo run
 Usage with Linuxbrew may not work, I completely uninstalled linuxbrew to make
 the development work on my computer. See
 https://github.com/tauri-apps/tauri/issues/3856
+
+## License
+
+Most code is MIT except files specifically marked as otherwise (some code from
+symphonia, marked MPL 2.0)
