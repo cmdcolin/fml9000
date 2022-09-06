@@ -63,8 +63,8 @@ pub fn process_file(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error>
       match tag {
         Some(tag) => {
           tx.execute(
-            "INSERT INTO tracks (filename,track,artist,album,album_artist,title,genre) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            (&path, tag.track(), tag.artist(), tag.album(), tag.get_string(&ItemKey::AlbumArtist), tag.title(),tag.genre()),
+            "INSERT INTO tracks (filename,track,artist,album,album_artist,title,genre) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            (&path, tag.track(), tag.artist(), tag.album(), tag.get_string(&ItemKey::AlbumArtist), tag.title(), tag.genre()),
           )?;
 
           Ok(())
@@ -102,7 +102,8 @@ pub fn init_db() -> Result<Connection, rusqlite::Error> {
 
 pub fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
   let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-  let mut stmt = conn.prepare("SELECT filename,title,artist,album_artist,album FROM tracks")?;
+  let mut stmt =
+    conn.prepare("SELECT filename,title,artist,album_artist,album,genre,track FROM tracks")?;
   let rows = stmt.query_map([], |row| {
     Ok(Track {
       filename: row.get(0)?,
@@ -110,8 +111,8 @@ pub fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Er
       artist: row.get(2)?,
       album_artist: row.get(3)?,
       album: row.get(4)?,
-      genre: None,
-      track: None,
+      genre: row.get(5)?,
+      track: row.get(6)?,
     })
   })?;
 
@@ -137,10 +138,7 @@ pub fn load_facet_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
   })?;
 
   for t in rows {
-    match t {
-      Ok(t) => store.append(&BoxedAnyObject::new(t)),
-      Err(e) => println!("{}", e),
-    }
+    store.append(&BoxedAnyObject::new(t.unwrap()))
   }
 
   Ok(())

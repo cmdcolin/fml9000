@@ -57,29 +57,7 @@ pub fn play_track(path_str: String) {
   // Probe the media source stream for metadata and get the format reader.
   match symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts) {
     Ok(mut probed) => {
-      let result = if false {
-        // Verify-only mode decodes and verifies the audio, but does not play it.
-        decode_only(
-          probed.format,
-          &DecoderOptions {
-            verify: true,
-            ..Default::default()
-          },
-        )
-      } else if false {
-        // Decode-only mode decodes the audio, but does not play or verify it.
-        decode_only(
-          probed.format,
-          &DecoderOptions {
-            verify: false,
-            ..Default::default()
-          },
-        )
-      } else if false {
-        // Probe-only mode only prints information about the format, tracks, metadata, etc.
-        print_format(&path_str, &mut probed);
-        Ok(())
-      } else {
+      let result = {
         // Playback mode.
         print_format(&path_str, &mut probed);
 
@@ -106,49 +84,6 @@ pub fn play_track(path_str: String) {
       error!("file not supported. reason? {}", err);
     }
   }
-}
-
-fn decode_only(mut reader: Box<dyn FormatReader>, decode_opts: &DecoderOptions) -> Result<()> {
-  // Get the default track.
-  // TODO: Allow track selection.
-  let track = reader.default_track().unwrap();
-  let track_id = track.id;
-
-  // Create a decoder for the track.
-  let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, decode_opts)?;
-
-  // Decode all packets, ignoring all decode errors.
-  let result = loop {
-    let packet = match reader.next_packet() {
-      Ok(packet) => packet,
-      Err(err) => break Err(err),
-    };
-
-    // If the packet does not belong to the selected track, skip over it.
-    if packet.track_id() != track_id {
-      continue;
-    }
-
-    // Decode the packet into audio samples.
-    match decoder.decode(&packet) {
-      Ok(_decoded) => continue,
-      Err(Error::DecodeError(err)) => warn!("decode error: {}", err),
-      Err(err) => break Err(err),
-    }
-  };
-
-  // Regardless of result, finalize the decoder to get the verification result.
-  let finalize_result = decoder.finalize();
-
-  if let Some(verify_ok) = finalize_result.verify_ok {
-    if verify_ok {
-      info!("verification passed");
-    } else {
-      info!("verification failed");
-    }
-  }
-
-  result
 }
 
 #[derive(Copy, Clone)]

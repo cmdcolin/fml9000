@@ -33,10 +33,9 @@ fn app_main(application: &Application) {
   let (tx, rx) = mpsc::channel();
   let thread = thread::Builder::new()
     .name("music_player_thread".to_string())
-    .spawn(move || {
-      let received = rx.recv().unwrap();
-      println!("{}", received);
-      play_track::play_track(received);
+    .spawn(move || match rx.recv() {
+      Ok(received) => play_track::play_track(received),
+      Err(e) => println!("{}", e),
     });
 
   let window = ApplicationWindow::builder()
@@ -46,6 +45,7 @@ fn app_main(application: &Application) {
     .title("fml9000")
     .build();
 
+  database::run_scan();
   load_css::load_css();
 
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
@@ -67,6 +67,7 @@ fn app_main(application: &Application) {
   let artistalbum = SignalListItemFactory::new();
   let title = SignalListItemFactory::new();
   let filename = SignalListItemFactory::new();
+  let track = SignalListItemFactory::new();
   let facet = SignalListItemFactory::new();
   let playlist_manager = SignalListItemFactory::new();
 
@@ -81,15 +82,16 @@ fn app_main(application: &Application) {
   let playlist_col2 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
-    .title("Title")
-    .fixed_width(300)
-    .factory(&title)
+    .title("#")
+    .fixed_width(20)
+    .factory(&track)
     .build();
+
   let playlist_col3 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
-    .title("Track")
-    .fixed_width(20)
+    .title("Title")
+    .fixed_width(300)
     .factory(&title)
     .build();
 
@@ -181,6 +183,22 @@ fn app_main(application: &Application) {
     });
   });
 
+  track.connect_setup(move |_factory, item| {
+    let item = item.downcast_ref::<ListItem>().unwrap();
+    let row = GridCell::new();
+    item.set_child(Some(&row));
+  });
+
+  track.connect_bind(move |_factory, item| {
+    let item = item.downcast_ref::<ListItem>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<database::Track> = obj.borrow();
+    child.set_entry(&Entry {
+      name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
+    });
+  });
+
   title.connect_setup(move |_factory, item| {
     let item = item.downcast_ref::<ListItem>().unwrap();
     let row = GridCell::new();
@@ -195,6 +213,22 @@ fn app_main(application: &Application) {
     child.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     });
+  });
+
+  title.connect_bind(move |_factory, item| {
+    let item = item.downcast_ref::<ListItem>().unwrap();
+    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
+    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let r: Ref<database::Track> = obj.borrow();
+    child.set_entry(&Entry {
+      name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
+    });
+  });
+
+  filename.connect_setup(move |_factory, item| {
+    let item = item.downcast_ref::<ListItem>().unwrap();
+    let row = GridCell::new();
+    item.set_child(Some(&row));
   });
 
   filename.connect_setup(move |_factory, item| {
