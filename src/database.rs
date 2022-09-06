@@ -20,6 +20,7 @@ pub struct Track {
 pub struct Facet {
   pub album_artist: Option<String>,
   pub album: Option<String>,
+  pub all: bool,
 }
 
 pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> {
@@ -134,8 +135,15 @@ pub fn load_facet_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
     Ok(Facet {
       album: row.get(0)?,
       album_artist: row.get(1)?,
+      all: false,
     })
   })?;
+
+  store.append(&BoxedAnyObject::new(Facet {
+    album: None,
+    album_artist: None,
+    all: true,
+  }));
 
   for t in rows {
     store.append(&BoxedAnyObject::new(t.unwrap()))

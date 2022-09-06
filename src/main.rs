@@ -5,6 +5,7 @@ mod play_track;
 
 use crate::grid_cell::Entry;
 use crate::grid_cell::GridCell;
+use database::{Facet, Track};
 use gtk::glib;
 use gtk::glib::closure_local;
 use gtk::glib::BoxedAnyObject;
@@ -29,6 +30,20 @@ fn main() {
   app.run();
 }
 
+fn setup_col(item: &ListItem) {
+  item
+    .downcast_ref::<ListItem>()
+    .unwrap()
+    .set_child(Some(&GridCell::new()));
+}
+
+fn get_obj(item: &ListItem) -> (GridCell, BoxedAnyObject) {
+  let item = item.downcast_ref::<ListItem>().unwrap();
+  let child = item.child().unwrap().downcast::<GridCell>().unwrap();
+  let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+  (child, obj)
+}
+
 fn app_main(application: &Application) {
   let (tx, rx) = mpsc::channel();
   let thread = thread::Builder::new()
@@ -38,19 +53,19 @@ fn app_main(application: &Application) {
       Err(e) => println!("{}", e),
     });
 
-  let window = ApplicationWindow::builder()
+  let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
     .application(application)
     .title("fml9000")
     .build();
 
-  database::run_scan();
+  // database::run_scan();
   load_css::load_css();
 
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
-  let playlist_manager_store = gio::ListStore::new(BoxedAnyObject::static_type());
+  let playlist_mgr_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
   let playlist_sel = SingleSelection::builder().model(&playlist_store).build();
   let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
@@ -58,18 +73,18 @@ fn app_main(application: &Application) {
   let facet_sel = SingleSelection::builder().model(&facet_store).build();
   let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
-  let playlist_manager_sel = SingleSelection::builder()
-    .model(&playlist_manager_store)
+  let playlist_mgr_sel = SingleSelection::builder()
+    .model(&playlist_mgr_store)
     .build();
 
-  let playlist_manager_columnview = ColumnView::builder().model(&playlist_manager_sel).build();
+  let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
 
   let artistalbum = SignalListItemFactory::new();
   let title = SignalListItemFactory::new();
   let filename = SignalListItemFactory::new();
   let track = SignalListItemFactory::new();
   let facet = SignalListItemFactory::new();
-  let playlist_manager = SignalListItemFactory::new();
+  let playlist_mgr = SignalListItemFactory::new();
 
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
@@ -109,9 +124,9 @@ fn app_main(application: &Application) {
     .expand(true)
     .build();
 
-  let playlist_manager_col = ColumnViewColumn::builder()
+  let playlist_mgr_col = ColumnViewColumn::builder()
     .title("Playlists")
-    .factory(&playlist_manager)
+    .factory(&playlist_mgr)
     .expand(true)
     .build();
 
@@ -120,7 +135,7 @@ fn app_main(application: &Application) {
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
   facet_columnview.append_column(&facet_col);
-  playlist_manager_columnview.append_column(&playlist_manager_col);
+  playlist_mgr_columnview.append_column(&playlist_mgr_col);
 
   playlist_columnview.connect_activate(move |columnview, position| {
     let model = columnview.model().unwrap();
@@ -129,52 +144,54 @@ fn app_main(application: &Application) {
       .unwrap()
       .downcast::<BoxedAnyObject>()
       .unwrap();
-    let r: Ref<database::Track> = item.borrow();
+    let r: Ref<Track> = item.borrow();
     let f = r.filename.clone();
     tx.send(f.to_string());
   });
 
+  facet_columnview.connect_activate(move |columnview, position| {
+    let model = columnview.model().unwrap();
+    let item = model
+      .item(position)
+      .unwrap()
+      .downcast::<BoxedAnyObject>()
+      .unwrap();
+    let r: Ref<Facet> = item.borrow();
+    // let f = r.album;
+    // playlist_columnview.set_model(new_model);
+  });
+
   database::load_playlist_store_db(&playlist_store);
   database::load_facet_db(&facet_store);
-  playlist_manager_store.append(&BoxedAnyObject::new(Playlist {
+  playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
-  playlist_manager_store.append(&BoxedAnyObject::new(Playlist {
+  playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently played".to_string(),
   }));
 
-  facet.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
+  facet.connect_setup(move |_factory, item| setup_col(item));
   facet.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<database::Facet> = obj.borrow();
-    child.set_entry(&Entry {
-      name: format!(
-        "{} / {}",
-        r.album_artist.as_ref().unwrap_or(&"".to_string()),
-        r.album.as_ref().unwrap_or(&"".to_string()),
-      ),
+    let (cell, obj) = get_obj(item);
+    let r: Ref<Facet> = obj.borrow();
+    cell.set_entry(&Entry {
+      name: if r.all {
+        "(All)".to_string()
+      } else {
+        format!(
+          "{} / {}",
+          r.album_artist.as_ref().unwrap_or(&"(Unknown)".to_string()),
+          r.album.as_ref().unwrap_or(&"(Unknown)".to_string()),
+        )
+      },
     });
   });
 
-  artistalbum.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
+  artistalbum.connect_setup(move |_factory, item| setup_col(item));
   artistalbum.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<database::Track> = obj.borrow();
-    child.set_entry(&Entry {
+    let (cell, obj) = get_obj(item);
+    let r: Ref<Track> = obj.borrow();
+    cell.set_entry(&Entry {
       name: format!(
         "{} / {}",
         r.album.as_ref().unwrap_or(&"".to_string()),
@@ -183,87 +200,43 @@ fn app_main(application: &Application) {
     });
   });
 
-  track.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
+  track.connect_setup(move |_factory, item| setup_col(item));
   track.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<database::Track> = obj.borrow();
-    child.set_entry(&Entry {
+    let (cell, obj) = get_obj(item);
+    let r: Ref<Track> = obj.borrow();
+    cell.set_entry(&Entry {
       name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
     });
   });
 
-  title.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
+  title.connect_setup(move |_factory, item| setup_col(item));
   title.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<database::Track> = obj.borrow();
-    child.set_entry(&Entry {
+    let (cell, obj) = get_obj(item);
+    let r: Ref<Track> = obj.borrow();
+    cell.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     });
   });
 
-  title.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<database::Track> = obj.borrow();
-    child.set_entry(&Entry {
-      name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
-    });
-  });
-
-  filename.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
-  filename.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
+  filename.connect_setup(move |_factory, item| setup_col(item));
   filename.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let r: Ref<database::Track> = obj.borrow();
-    child.set_entry(&Entry {
+    let (cell, obj) = get_obj(item);
+    let r: Ref<Track> = obj.borrow();
+    cell.set_entry(&Entry {
       name: r.filename.to_string(),
     });
   });
 
-  playlist_manager.connect_setup(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let row = GridCell::new();
-    item.set_child(Some(&row));
-  });
-
-  playlist_manager.connect_bind(move |_factory, item| {
-    let item = item.downcast_ref::<ListItem>().unwrap();
-    let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-    let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+  playlist_mgr.connect_setup(move |_factory, item| setup_col(item));
+  playlist_mgr.connect_bind(move |_factory, item| {
+    let (cell, obj) = get_obj(item);
     let r: Ref<Playlist> = obj.borrow();
-    child.set_entry(&Entry {
+    cell.set_entry(&Entry {
       name: r.name.to_string(),
     });
   });
 
-  let facet_window = ScrolledWindow::builder()
+  let facet_wnd = ScrolledWindow::builder()
     .child(&facet_columnview)
     .vexpand(true)
     .build();
@@ -271,14 +244,14 @@ fn app_main(application: &Application) {
   let facet_box = Box::new(gtk::Orientation::Vertical, 0);
   let search_bar = SearchEntry::builder().build();
   facet_box.append(&search_bar);
-  facet_box.append(&facet_window);
+  facet_box.append(&facet_wnd);
 
-  let playlist_window = ScrolledWindow::builder()
+  let playlist_wnd = ScrolledWindow::builder()
     .child(&playlist_columnview)
     .build();
 
-  let playlist_manager_window = ScrolledWindow::builder()
-    .child(&playlist_manager_columnview)
+  let playlist_mgr_wnd = ScrolledWindow::builder()
+    .child(&playlist_mgr_columnview)
     .build();
 
   let album_art = Image::builder().file("/home/cdiesh/wow.png").build();
@@ -287,13 +260,13 @@ fn app_main(application: &Application) {
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
     .start_child(&facet_box)
-    .end_child(&playlist_window)
+    .end_child(&playlist_wnd)
     .build();
 
   let rtopbottom = Paned::builder()
     .vexpand(true)
     .orientation(gtk::Orientation::Vertical)
-    .start_child(&playlist_manager_window)
+    .start_child(&playlist_mgr_wnd)
     .end_child(&album_art)
     .build();
 
@@ -372,8 +345,8 @@ fn app_main(application: &Application) {
   let main_ui = Box::new(gtk::Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
-  window.set_child(Some(&main_ui));
-  window.show();
+  wnd.set_child(Some(&main_ui));
+  wnd.show();
 }
 
 #[macro_use]
