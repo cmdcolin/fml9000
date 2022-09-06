@@ -16,6 +16,7 @@ use gtk::{
   VolumeButton,
 };
 use std::cell::Ref;
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 
@@ -149,6 +150,10 @@ fn app_main(application: &Application) {
     tx.send(f.to_string());
   });
 
+  // let five = Rc::new(playlist_store);
+  // let cl = five.clone();
+  // let cl2 = five.clone();
+
   facet_columnview.connect_activate(move |columnview, position| {
     let model = columnview.model().unwrap();
     let item = model
@@ -157,12 +162,13 @@ fn app_main(application: &Application) {
       .downcast::<BoxedAnyObject>()
       .unwrap();
     let r: Ref<Facet> = item.borrow();
+    // database::load_facet_db(&cl, &r);
     // let f = r.album;
     // playlist_columnview.set_model(new_model);
   });
 
-  database::load_playlist_store_db(&playlist_store);
-  database::load_facet_db(&facet_store);
+  let rows = database::load_all().unwrap();
+  database::load_stores(rows, &playlist_store, &facet_store);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));

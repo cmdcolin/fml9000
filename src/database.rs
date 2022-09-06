@@ -4,9 +4,10 @@ use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use lofty::{Accessor, ItemKey, Probe};
 use rusqlite::{Connection, Result, Transaction};
+use std::collections::HashSet;
 use std::thread;
 use walkdir::WalkDir;
-
+#[derive(Debug)]
 pub struct Track {
   pub album_artist: Option<String>,
   pub album: Option<String>,
@@ -17,6 +18,7 @@ pub struct Track {
   pub filename: String,
 }
 
+#[derive(Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Facet {
   pub album_artist: Option<String>,
   pub album: Option<String>,
@@ -39,12 +41,8 @@ pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Err
       )",
     (),
   ) {
-    Ok(_) => {
-      println!("Created new DB")
-    }
-    Err(e) => {
-      println!("{}", e)
-    }
+    Ok(_) => println!("Created new DB"),
+    Err(e) => eprintln!("{}", e),
   }
 
   Ok(conn)
@@ -90,7 +88,7 @@ pub fn init_db() -> Result<Connection, rusqlite::Error> {
   ) {
     let tx = conn.transaction()?;
     for file in chunk {
-      if file.file_type().is_file() && i < 10000 {
+      if file.file_type().is_file() && i < 100000 {
         let path = file.path();
         process_file(&tx, &path.display().to_string())?;
         i = i + 1;
@@ -101,10 +99,12 @@ pub fn init_db() -> Result<Connection, rusqlite::Error> {
   Ok(conn)
 }
 
-pub fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
+pub fn load_all() -> Result<Vec<Track>, rusqlite::Error> {
   let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
   let mut stmt =
     conn.prepare("SELECT filename,title,artist,album_artist,album,genre,track FROM tracks")?;
+
+  let mut names = Vec::new();
   let rows = stmt.query_map([], |row| {
     Ok(Track {
       filename: row.get(0)?,
@@ -116,49 +116,36 @@ pub fn load_playlist_store_db(store: &gio::ListStore) -> Result<(), rusqlite::Er
       track: row.get(6)?,
     })
   })?;
-
-  for t in rows {
-    match t {
-      Ok(t) => store.append(&BoxedAnyObject::new(t)),
-      Err(e) => println!("{}", e),
-    }
+  for row in rows {
+    names.push(row.unwrap());
   }
 
-  Ok(())
+  Ok(names)
 }
 
-pub fn load_facet_db(store: &gio::ListStore) -> Result<(), rusqlite::Error> {
-  let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-  let mut stmt =
-    conn.prepare("SELECT DISTINCT album,album_artist FROM tracks ORDER BY album_artist")?;
-  let rows = stmt.query_map([], |row| {
-    Ok(Facet {
-      album: row.get(0)?,
-      album_artist: row.get(1)?,
+pub fn load_stores(rows: Vec<Track>, store: &gio::ListStore, facet_store: &gio::ListStore) {
+  let mut facets = HashSet::new();
+  for row in rows {
+    facets.insert(Facet {
+      album: row.album.clone(),
+      album_artist: row.album_artist.clone(),
       all: false,
-    })
-  })?;
+    });
+    store.append(&BoxedAnyObject::new(row));
+  }
 
   store.append(&BoxedAnyObject::new(Facet {
     album: None,
     album_artist: None,
     all: true,
   }));
-
-  for t in rows {
-    store.append(&BoxedAnyObject::new(t.unwrap()))
+  let mut v = Vec::from_iter(facets);
+  v.sort();
+  for uniq in v {
+    facet_store.append(&BoxedAnyObject::new(uniq))
   }
-
-  Ok(())
 }
 
 pub fn run_scan() {
-  thread::spawn(|| match init_db() {
-    Ok(conn) => {
-      println!("initialized");
-    }
-    Err(e) => {
-      println!("{}", e);
-    }
-  });
+  init_db();
 }
