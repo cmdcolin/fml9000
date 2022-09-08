@@ -68,10 +68,10 @@ fn app_main(application: &Application) {
   let playlist_mgr_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
   let playlist_sel = SingleSelection::builder().model(&playlist_store).build();
-  let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
+  let playlist_cv = ColumnView::builder().model(&playlist_sel).build();
 
   let facet_sel = MultiSelection::new(Some(&facet_store));
-  let facet_columnview = ColumnView::builder()
+  let facet_cv = ColumnView::builder()
     .model(&facet_sel)
     .enable_rubberband(true)
     .build();
@@ -80,7 +80,7 @@ fn app_main(application: &Application) {
     .model(&playlist_mgr_store)
     .build();
 
-  let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
+  let playlist_mgr_cv = ColumnView::builder().model(&playlist_mgr_sel).build();
 
   let artistalbum = SignalListItemFactory::new();
   let title = SignalListItemFactory::new();
@@ -133,15 +133,15 @@ fn app_main(application: &Application) {
     .expand(true)
     .build();
 
-  playlist_columnview.append_column(&playlist_col1);
-  playlist_columnview.append_column(&playlist_col2);
-  playlist_columnview.append_column(&playlist_col3);
-  playlist_columnview.append_column(&playlist_col4);
-  facet_columnview.append_column(&facet_col);
-  playlist_mgr_columnview.append_column(&playlist_mgr_col);
+  playlist_cv.append_column(&playlist_col1);
+  playlist_cv.append_column(&playlist_col2);
+  playlist_cv.append_column(&playlist_col3);
+  playlist_cv.append_column(&playlist_col4);
+  facet_cv.append_column(&facet_col);
+  playlist_mgr_cv.append_column(&playlist_mgr_col);
 
-  playlist_columnview.connect_activate(move |columnview, position| {
-    let model = columnview.model().unwrap();
+  playlist_cv.connect_activate(move |cv, position| {
+    let model = cv.model().unwrap();
     let item = model
       .item(position)
       .unwrap()
@@ -156,8 +156,8 @@ fn app_main(application: &Application) {
   let cl = five.clone();
   let cl2 = five.clone();
 
-  facet_columnview.connect_activate(move |columnview, position| {
-    let model = columnview.model().unwrap();
+  facet_cv.connect_activate(move |cv, position| {
+    let model = cv.model().unwrap();
     let item = model
       .item(position)
       .unwrap()
@@ -168,7 +168,7 @@ fn app_main(application: &Application) {
 
     // database::load_facet_db(&cl, &r);
     // let f = r.album;
-    // playlist_columnview.set_model(new_model);
+    // playlist_cv.set_model(new_model);
   });
 
   let rows = Rc::new(database::load_all().unwrap());
@@ -249,7 +249,7 @@ fn app_main(application: &Application) {
   });
 
   let facet_wnd = ScrolledWindow::builder()
-    .child(&facet_columnview)
+    .child(&facet_cv)
     .vexpand(true)
     .build();
 
@@ -258,13 +258,9 @@ fn app_main(application: &Application) {
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
 
-  let playlist_wnd = ScrolledWindow::builder()
-    .child(&playlist_columnview)
-    .build();
+  let playlist_wnd = ScrolledWindow::builder().child(&playlist_cv).build();
 
-  let playlist_mgr_wnd = ScrolledWindow::builder()
-    .child(&playlist_mgr_columnview)
-    .build();
+  let playlist_mgr_wnd = ScrolledWindow::builder().child(&playlist_mgr_cv).build();
 
   let album_art = Image::builder()
     .file("/home/cdiesh/src/fml9000/cover.jpg")
@@ -337,6 +333,7 @@ fn app_main(application: &Application) {
     Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
   );
   let volume_button = VolumeButton::new();
+  volume_button.set_value(1.0);
   seek_slider.set_hexpand(true);
 
   button_box.append(&seek_slider);
