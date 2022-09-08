@@ -7,13 +7,12 @@ use crate::grid_cell::Entry;
 use crate::grid_cell::GridCell;
 use database::{Facet, Track};
 use gtk::glib;
-use gtk::glib::closure_local;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
   gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, Image,
-  ListItem, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory, SingleSelection,
-  VolumeButton,
+  ListItem, MultiSelection, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory,
+  SingleSelection, VolumeButton,
 };
 use std::cell::Ref;
 use std::rc::Rc;
@@ -71,8 +70,11 @@ fn app_main(application: &Application) {
   let playlist_sel = SingleSelection::builder().model(&playlist_store).build();
   let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
 
-  let facet_sel = SingleSelection::builder().model(&facet_store).build();
-  let facet_columnview = ColumnView::builder().model(&facet_sel).build();
+  let facet_sel = MultiSelection::new(Some(&facet_store));
+  let facet_columnview = ColumnView::builder()
+    .model(&facet_sel)
+    .enable_rubberband(true)
+    .build();
 
   let playlist_mgr_sel = SingleSelection::builder()
     .model(&playlist_mgr_store)
@@ -150,9 +152,9 @@ fn app_main(application: &Application) {
     tx.send(f.to_string());
   });
 
-  // let five = Rc::new(playlist_store);
-  // let cl = five.clone();
-  // let cl2 = five.clone();
+  let five = Rc::new(playlist_store);
+  let cl = five.clone();
+  let cl2 = five.clone();
 
   facet_columnview.connect_activate(move |columnview, position| {
     let model = columnview.model().unwrap();
@@ -162,13 +164,17 @@ fn app_main(application: &Application) {
       .downcast::<BoxedAnyObject>()
       .unwrap();
     let r: Ref<Facet> = item.borrow();
+    cl.remove_all();
+
     // database::load_facet_db(&cl, &r);
     // let f = r.album;
     // playlist_columnview.set_model(new_model);
   });
 
-  let rows = database::load_all().unwrap();
-  database::load_stores(rows, &playlist_store, &facet_store);
+  let rows = Rc::new(database::load_all().unwrap());
+  let r = rows.clone();
+  database::load_playlist_store(&rows, &cl2);
+  database::load_facet_store(&r, &facet_store);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -196,7 +202,7 @@ fn app_main(application: &Application) {
   artistalbum.connect_setup(move |_factory, item| setup_col(item));
   artistalbum.connect_bind(move |_factory, item| {
     let (cell, obj) = get_obj(item);
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!(
         "{} / {}",
@@ -209,7 +215,7 @@ fn app_main(application: &Application) {
   track.connect_setup(move |_factory, item| setup_col(item));
   track.connect_bind(move |_factory, item| {
     let (cell, obj) = get_obj(item);
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
     });
@@ -218,7 +224,7 @@ fn app_main(application: &Application) {
   title.connect_setup(move |_factory, item| setup_col(item));
   title.connect_bind(move |_factory, item| {
     let (cell, obj) = get_obj(item);
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     });
@@ -227,7 +233,7 @@ fn app_main(application: &Application) {
   filename.connect_setup(move |_factory, item| setup_col(item));
   filename.connect_bind(move |_factory, item| {
     let (cell, obj) = get_obj(item);
-    let r: Ref<Track> = obj.borrow();
+    let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: r.filename.to_string(),
     });
@@ -260,7 +266,9 @@ fn app_main(application: &Application) {
     .child(&playlist_mgr_columnview)
     .build();
 
-  let album_art = Image::builder().file("/home/cdiesh/wow.png").build();
+  let album_art = Image::builder()
+    .file("/home/cdiesh/src/fml9000/cover.jpg")
+    .build();
 
   let ltopbottom = Paned::builder()
     .vexpand(true)
@@ -342,7 +350,7 @@ fn app_main(application: &Application) {
   pause_btn.connect_closure(
     "clicked",
     false,
-    closure_local!(move |button: Button| {
+    glib::closure_local!(move |button: Button| {
       // Set the label to "Hello World!" after the button has been clicked on
       button.set_label("Hello World!");
     }),

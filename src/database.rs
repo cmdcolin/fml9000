@@ -5,8 +5,9 @@ use gtk::glib::BoxedAnyObject;
 use lofty::{Accessor, ItemKey, Probe};
 use rusqlite::{Connection, Result, Transaction};
 use std::collections::HashSet;
-use std::thread;
+use std::rc::Rc;
 use walkdir::WalkDir;
+
 #[derive(Debug)]
 pub struct Track {
   pub album_artist: Option<String>,
@@ -99,14 +100,14 @@ pub fn init_db() -> Result<Connection, rusqlite::Error> {
   Ok(conn)
 }
 
-pub fn load_all() -> Result<Vec<Track>, rusqlite::Error> {
+pub fn load_all() -> Result<Vec<Rc<Track>>, rusqlite::Error> {
   let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
   let mut stmt =
     conn.prepare("SELECT filename,title,artist,album_artist,album,genre,track FROM tracks")?;
 
   let mut names = Vec::new();
   let rows = stmt.query_map([], |row| {
-    Ok(Track {
+    Ok(Rc::new(Track {
       filename: row.get(0)?,
       title: row.get(1)?,
       artist: row.get(2)?,
@@ -114,7 +115,7 @@ pub fn load_all() -> Result<Vec<Track>, rusqlite::Error> {
       album: row.get(4)?,
       genre: row.get(5)?,
       track: row.get(6)?,
-    })
+    }))
   })?;
   for row in rows {
     names.push(row.unwrap());
@@ -123,7 +124,13 @@ pub fn load_all() -> Result<Vec<Track>, rusqlite::Error> {
   Ok(names)
 }
 
-pub fn load_stores(rows: Vec<Track>, store: &gio::ListStore, facet_store: &gio::ListStore) {
+pub fn load_playlist_store(rows: &[Rc<Track>], store: &gio::ListStore) {
+  for row in rows {
+    store.append(&BoxedAnyObject::new(row.clone()));
+  }
+}
+
+pub fn load_facet_store(rows: &[Rc<Track>], facet_store: &gio::ListStore) {
   let mut facets = HashSet::new();
   for row in rows {
     facets.insert(Facet {
@@ -131,10 +138,8 @@ pub fn load_stores(rows: Vec<Track>, store: &gio::ListStore, facet_store: &gio::
       album_artist: row.album_artist.clone(),
       all: false,
     });
-    store.append(&BoxedAnyObject::new(row));
   }
-
-  store.append(&BoxedAnyObject::new(Facet {
+  facet_store.append(&BoxedAnyObject::new(Facet {
     album: None,
     album_artist: None,
     all: true,
