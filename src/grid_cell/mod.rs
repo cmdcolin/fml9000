@@ -4,7 +4,7 @@ use gtk::subclass::prelude::*;
 
 glib::wrapper! {
   pub struct GridCell(ObjectSubclass<imp::GridCell>)
-    @extends gtk::Widget, gtk::Box;
+    @extends gtk::Widget;
 }
 
 impl Default for GridCell {
@@ -22,7 +22,7 @@ impl GridCell {
     glib::Object::new(&[]).expect("Failed to create GridCell")
   }
 
-  pub fn set_entry(&self, app_info: &Entry) {
-    self.imp().name.set_text(&app_info.name);
+  pub fn set_entry(&self, entry: &Entry) {
+    self.imp().name.set_text(&entry.name);
   }
 }

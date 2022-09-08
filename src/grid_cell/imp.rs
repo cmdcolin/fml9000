@@ -19,6 +19,8 @@ impl ObjectSubclass for GridCell {
   type ParentType = gtk::Widget;
 
   fn class_init(klass: &mut Self::Class) {
+    // users can either set a layout manager (as below) or override the size_allocate / measure
+    // functions of the WidgetImpl trait.
     klass.set_layout_manager_type::<BinLayout>();
     klass.bind_template();
   }
@@ -29,11 +31,8 @@ impl ObjectSubclass for GridCell {
 }
 
 impl ObjectImpl for GridCell {
-  fn dispose(&self, widget: &Self::Type) {
-    while let Some(child) = widget.first_child() {
-      child.unparent();
-    }
+  fn dispose(&self, _widget: &Self::Type) {
+    self.name.unparent();
   }
 }
 impl WidgetImpl for GridCell {}
-impl BoxImpl for GridCell {}
