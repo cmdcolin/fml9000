@@ -364,33 +364,30 @@ fn app_main(application: &Application) {
 extern crate time_test;
 #[cfg(test)]
 mod tests {
-  use crate::database::load_facet_db;
-  use crate::database::load_playlist_store_db;
+  use crate::database::load_all;
+  use crate::database::load_facet_store;
+  use crate::database::load_playlist_store;
   use gtk::gio;
   use gtk::glib::BoxedAnyObject;
   use gtk::prelude::*;
 
   #[test]
-  fn load_playlist_store() {
+  fn test_playlist_store() {
     time_test!();
     let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
-    match load_playlist_store_db(&playlist_store) {
-      Ok(_) => println!("h1"),
-      Err(e) => println!("{}", e),
-    };
+    let tracks = load_all().unwrap();
+    load_playlist_store(&tracks, &playlist_store);
     println!("{}", playlist_store.n_items());
-    assert_eq!(playlist_store.n_items(), 30940);
+    assert_eq!(playlist_store.n_items(), 23332);
   }
 
   #[test]
   fn load_facet() {
     time_test!();
     let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
-    match load_facet_db(&playlist_store) {
-      Ok(_) => println!("h1"),
-      Err(e) => println!("{}", e),
-    };
+    let tracks = load_all().unwrap();
+    load_facet_store(&tracks, &playlist_store);
     println!("{}", playlist_store.n_items());
-    assert_eq!(playlist_store.n_items(), 1272);
+    assert_eq!(playlist_store.n_items(), 2265);
   }
 }
