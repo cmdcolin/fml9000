@@ -15,6 +15,7 @@ use gtk::{
   SingleSelection, VolumeButton,
 };
 use std::cell::Ref;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
@@ -85,11 +86,33 @@ fn app_main(application: &Application) {
 
   let playlist_store_rc = Rc::new(playlist_store);
   let playlist_store_rc1 = playlist_store_rc.clone();
-  facet_sel_rc.connect_selection_changed(move |a, b, c| {
+
+  let facet_store_rc = Rc::new(facet_store);
+  let facet_store_rc1 = facet_store_rc.clone();
+  facet_sel_rc.connect_selection_changed(move |_, _, _| {
     let selection = facet_sel_rc1.selection();
-    let (iter, size) = gtk::BitsetIter::init_first(&selection).unwrap();
+    let (iter, first_pos) = gtk::BitsetIter::init_first(&selection).unwrap();
     playlist_store_rc1.remove_all();
-    for item in iter {}
+    let item = facet_store_rc1
+      .item(first_pos)
+      .unwrap()
+      .downcast::<BoxedAnyObject>()
+      .unwrap();
+    let r: Ref<Facet> = item.borrow();
+
+    println!("{:?}", r);
+    for pos in iter {
+      let item = facet_store_rc1
+        .item(pos)
+        .unwrap()
+        .downcast::<BoxedAnyObject>()
+        .unwrap();
+      let r: Ref<Facet> = item.borrow();
+      println!("{:?}", r);
+      // rows.
+
+      // database::load_playlist_store(&rows, &playlist_store_rc);
+    }
   });
 
   let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
@@ -180,9 +203,14 @@ fn app_main(application: &Application) {
   // });
 
   let rows = Rc::new(database::load_all().unwrap());
+
+  let mut book_reviews = HashMap::new();
   let r = rows.clone();
+  for row in rows.into_iter() {
+    println!("{:?}", row);
+  }
   database::load_playlist_store(&rows, &playlist_store_rc);
-  database::load_facet_store(&r, &facet_store);
+  database::load_facet_store(&r, &facet_store_rc);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));

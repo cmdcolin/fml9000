@@ -19,7 +19,7 @@ pub struct Track {
   pub filename: String,
 }
 
-#[derive(Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Hash, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct Facet {
   pub album_artist: Option<String>,
   pub album: Option<String>,
