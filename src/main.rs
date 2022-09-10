@@ -80,8 +80,16 @@ fn app_main(application: &Application) {
     .model(&playlist_mgr_store)
     .build();
 
-  facet_sel.connect_selection_changed(|a, b, c| {
-    println!("args {} {} {}", a, b, c);
+  let facet_sel_rc = Rc::new(facet_sel);
+  let facet_sel_rc1 = facet_sel_rc.clone();
+
+  let playlist_store_rc = Rc::new(playlist_store);
+  let playlist_store_rc1 = playlist_store_rc.clone();
+  facet_sel_rc.connect_selection_changed(move |a, b, c| {
+    let selection = facet_sel_rc1.selection();
+    let (iter, size) = gtk::BitsetIter::init_first(&selection).unwrap();
+    playlist_store_rc1.remove_all();
+    for item in iter {}
   });
 
   let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
@@ -153,32 +161,27 @@ fn app_main(application: &Application) {
       .unwrap();
     let r: Ref<Rc<Track>> = item.borrow();
     let f = r.filename.clone();
-    println!("out");
     tx.send(f.to_string());
   });
 
-  let five = Rc::new(playlist_store);
-  let cl = five.clone();
-  let cl2 = five.clone();
+  // facet_columnview.connect_activate(move |columnview, position| {
+  //   let model = columnview.model().unwrap();
+  //   let item = model
+  //     .item(position)
+  //     .unwrap()
+  //     .downcast::<BoxedAnyObject>()
+  //     .unwrap();
+  //   let r: Ref<Facet> = item.borrow();
+  //   cl.remove_all();
 
-  facet_columnview.connect_activate(move |columnview, position| {
-    let model = columnview.model().unwrap();
-    let item = model
-      .item(position)
-      .unwrap()
-      .downcast::<BoxedAnyObject>()
-      .unwrap();
-    let r: Ref<Facet> = item.borrow();
-    cl.remove_all();
-
-    // database::load_facet_db(&cl, &r);
-    // let f = r.album;
-    // playlist_columnview.set_model(new_model);
-  });
+  //   // database::load_facet_db(&cl, &r);
+  //   // let f = r.album;
+  //   // playlist_columnview.set_model(new_model);
+  // });
 
   let rows = Rc::new(database::load_all().unwrap());
   let r = rows.clone();
-  database::load_playlist_store(&rows, &cl2);
+  database::load_playlist_store(&rows, &playlist_store_rc);
   database::load_facet_store(&r, &facet_store);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
