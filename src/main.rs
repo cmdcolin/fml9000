@@ -37,7 +37,7 @@ fn setup_col(item: &ListItem) {
     .set_child(Some(&GridCell::new()));
 }
 
-fn get_obj(item: &ListItem) -> (GridCell, BoxedAnyObject) {
+fn get_cell(item: &ListItem) -> (GridCell, BoxedAnyObject) {
   let item = item.downcast_ref::<ListItem>().unwrap();
   let child = item.child().unwrap().downcast::<GridCell>().unwrap();
   let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
@@ -79,6 +79,10 @@ fn app_main(application: &Application) {
   let playlist_mgr_sel = SingleSelection::builder()
     .model(&playlist_mgr_store)
     .build();
+
+  facet_sel.connect_selection_changed(|a, b, c| {
+    println!("args {} {} {}", a, b, c);
+  });
 
   let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
 
@@ -147,7 +151,7 @@ fn app_main(application: &Application) {
       .unwrap()
       .downcast::<BoxedAnyObject>()
       .unwrap();
-    let r: Ref<Track> = item.borrow();
+    let r: Ref<Rc<Track>> = item.borrow();
     let f = r.filename.clone();
     println!("out");
     tx.send(f.to_string());
@@ -185,7 +189,7 @@ fn app_main(application: &Application) {
 
   facet.connect_setup(move |_factory, item| setup_col(item));
   facet.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_obj(item);
+    let (cell, obj) = get_cell(item);
     let r: Ref<Facet> = obj.borrow();
     cell.set_entry(&Entry {
       name: if r.all {
@@ -202,7 +206,7 @@ fn app_main(application: &Application) {
 
   artistalbum.connect_setup(move |_factory, item| setup_col(item));
   artistalbum.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_obj(item);
+    let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!(
@@ -215,7 +219,7 @@ fn app_main(application: &Application) {
 
   track.connect_setup(move |_factory, item| setup_col(item));
   track.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_obj(item);
+    let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
@@ -224,7 +228,7 @@ fn app_main(application: &Application) {
 
   title.connect_setup(move |_factory, item| setup_col(item));
   title.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_obj(item);
+    let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
@@ -233,7 +237,7 @@ fn app_main(application: &Application) {
 
   filename.connect_setup(move |_factory, item| setup_col(item));
   filename.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_obj(item);
+    let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: r.filename.to_string(),
@@ -242,7 +246,7 @@ fn app_main(application: &Application) {
 
   playlist_mgr.connect_setup(move |_factory, item| setup_col(item));
   playlist_mgr.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_obj(item);
+    let (cell, obj) = get_cell(item);
     let r: Ref<Playlist> = obj.borrow();
     cell.set_entry(&Entry {
       name: r.name.to_string(),
