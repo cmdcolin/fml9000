@@ -400,7 +400,7 @@ fn app_main(application: &Application) {
     }),
   );
 
-  let popover_menu = PopoverMenu::builder().child(child)
+  // let popover_menu = PopoverMenu::builder().child(child)
 
   let main_ui = Box::new(gtk::Orientation::Vertical, 0);
   main_ui.append(&button_box);

@@ -9,7 +9,7 @@ license = "MIT"
 [dependencies]
 symphonia = { version = "0.5", features = [ "aac", "alac", "mp3", "isomp4" ] }
 notify = "4"
-gtk = { version = "0.4", package = "gtk4" }
+gtk = { version = "0.4", package = "gtk4", features = ["v4_8"] }
 rusqlite = { version = "0.28", features = ["bundled"] }
 lofty = "0.8"
 walkdir = "2"
@@ -24,3 +24,5 @@ libpulse-simple-binding = "2.5.0"
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 cpal = "0.13.3"
 rb = "0.3.2"
+
+
