@@ -75,15 +75,18 @@ fn app_main(application: &Application) {
   let wnd_rc = Rc::new(wnd);
   let wnd_rc_1 = wnd_rc.clone();
 
-  database::run_scan();
+  // database::run_scan();
   load_css::load_css();
 
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
   let playlist_mgr_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
-  let playlist_sel = SingleSelection::builder().model(&playlist_store).build();
-  let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
+  let playlist_sel = MultiSelection::new(Some(&playlist_store));
+  let playlist_columnview = ColumnView::builder()
+    .model(&playlist_sel)
+    .enable_rubberband(true)
+    .build();
 
   let facet_sel = MultiSelection::new(Some(&facet_store));
   let facet_columnview = ColumnView::builder()
@@ -137,7 +140,7 @@ fn app_main(application: &Application) {
   let playlist_col4 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
-    .fixed_width(200)
+    .fixed_width(2000)
     .title("Filename")
     .factory(&filename)
     .build();
@@ -174,21 +177,6 @@ fn app_main(application: &Application) {
       str_or_unknown(&r.title),
     )))
   });
-
-  // facet_columnview.connect_activate(move |columnview, position| {
-  //   let model = columnview.model().unwrap();
-  //   let item = model
-  //     .item(position)
-  //     .unwrap()
-  //     .downcast::<BoxedAnyObject>()
-  //     .unwrap();
-  //   let r: Ref<Facet> = item.borrow();
-  //   cl.remove_all();
-
-  //   // database::load_facet_db(&cl, &r);
-  //   // let f = r.album;
-  //   // playlist_columnview.set_model(new_model);
-  // });
 
   let rows = Rc::new(database::load_all().unwrap());
   let r = rows.clone();
@@ -293,6 +281,7 @@ fn app_main(application: &Application) {
 
   let facet_wnd = ScrolledWindow::builder()
     .child(&facet_columnview)
+    .kinetic_scrolling(false)
     .vexpand(true)
     .build();
 
@@ -303,6 +292,7 @@ fn app_main(application: &Application) {
 
   let playlist_wnd = ScrolledWindow::builder()
     .child(&playlist_columnview)
+    .kinetic_scrolling(false)
     .build();
 
   let playlist_mgr_wnd = ScrolledWindow::builder()
