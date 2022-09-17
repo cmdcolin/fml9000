@@ -89,7 +89,7 @@ pub fn init_db() -> Result<Connection, rusqlite::Error> {
   ) {
     let tx = conn.transaction()?;
     for file in chunk {
-      if file.file_type().is_file() && i < 100000 {
+      if file.file_type().is_file() && i < 10000 {
         let path = file.path();
         process_file(&tx, &path.display().to_string())?;
         i = i + 1;
@@ -124,8 +124,11 @@ pub fn load_all() -> Result<Vec<Rc<Track>>, rusqlite::Error> {
   Ok(names)
 }
 
-pub fn load_playlist_store(rows: &[Rc<Track>], store: &gio::ListStore) {
-  for row in rows {
+pub fn load_playlist_store<'a, I>(vals: I, store: &gio::ListStore)
+where
+  I: Iterator<Item = &'a Rc<Track>>,
+{
+  for row in vals {
     store.append(&BoxedAnyObject::new(row.clone()));
   }
 }

@@ -9,13 +9,13 @@ use database::{Facet, Track};
 use gtk::glib;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
+use gtk::PopoverMenu;
 use gtk::{
   gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, Image,
-  ListItem, MultiSelection, Paned, Scale, ScrolledWindow, SearchEntry, SignalListItemFactory,
-  SingleSelection, VolumeButton,
+  ListItem, MultiSelection, Paned, Scale, ScrolledWindow, SearchEntry, SelectionModel,
+  SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use std::cell::Ref;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
@@ -31,6 +31,10 @@ fn main() {
   app.run();
 }
 
+fn str_or_unknown(str: &Option<String>) -> String {
+  str.as_ref().unwrap_or(&"(Unknown)".to_string()).to_string()
+}
+
 fn setup_col(item: &ListItem) {
   item
     .downcast_ref::<ListItem>()
@@ -43,6 +47,14 @@ fn get_cell(item: &ListItem) -> (GridCell, BoxedAnyObject) {
   let child = item.child().unwrap().downcast::<GridCell>().unwrap();
   let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
   (child, obj)
+}
+
+fn get_selection(sel: &MultiSelection, pos: u32) -> BoxedAnyObject {
+  sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
+}
+
+fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyObject {
+  sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
 }
 
 fn app_main(application: &Application) {
@@ -60,8 +72,10 @@ fn app_main(application: &Application) {
     .application(application)
     .title("fml9000")
     .build();
+  let wnd_rc = Rc::new(wnd);
+  let wnd_rc_1 = wnd_rc.clone();
 
-  // database::run_scan();
+  database::run_scan();
   load_css::load_css();
 
   let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
@@ -86,34 +100,6 @@ fn app_main(application: &Application) {
 
   let playlist_store_rc = Rc::new(playlist_store);
   let playlist_store_rc1 = playlist_store_rc.clone();
-
-  let facet_store_rc = Rc::new(facet_store);
-  let facet_store_rc1 = facet_store_rc.clone();
-  facet_sel_rc.connect_selection_changed(move |_, _, _| {
-    let selection = facet_sel_rc1.selection();
-    let (iter, first_pos) = gtk::BitsetIter::init_first(&selection).unwrap();
-    playlist_store_rc1.remove_all();
-    let item = facet_store_rc1
-      .item(first_pos)
-      .unwrap()
-      .downcast::<BoxedAnyObject>()
-      .unwrap();
-    let r: Ref<Facet> = item.borrow();
-
-    println!("{:?}", r);
-    for pos in iter {
-      let item = facet_store_rc1
-        .item(pos)
-        .unwrap()
-        .downcast::<BoxedAnyObject>()
-        .unwrap();
-      let r: Ref<Facet> = item.borrow();
-      println!("{:?}", r);
-      // rows.
-
-      // database::load_playlist_store(&rows, &playlist_store_rc);
-    }
-  });
 
   let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
 
@@ -175,16 +161,18 @@ fn app_main(application: &Application) {
   facet_columnview.append_column(&facet_col);
   playlist_mgr_columnview.append_column(&playlist_mgr_col);
 
-  playlist_columnview.connect_activate(move |columnview, position| {
-    let model = columnview.model().unwrap();
-    let item = model
-      .item(position)
-      .unwrap()
-      .downcast::<BoxedAnyObject>()
-      .unwrap();
+  playlist_columnview.connect_activate(move |columnview, pos| {
+    let selection = columnview.model().unwrap();
+    let item = get_playlist_activate_selection(&selection, pos);
     let r: Ref<Rc<Track>> = item.borrow();
     let f = r.filename.clone();
     tx.send(f.to_string());
+    wnd_rc_1.set_title(Some(&format!(
+      "fml9000 // {} - {} - {}",
+      str_or_unknown(&r.artist),
+      str_or_unknown(&r.album),
+      str_or_unknown(&r.title),
+    )))
   });
 
   // facet_columnview.connect_activate(move |columnview, position| {
@@ -203,14 +191,10 @@ fn app_main(application: &Application) {
   // });
 
   let rows = Rc::new(database::load_all().unwrap());
-
-  let mut book_reviews = HashMap::new();
   let r = rows.clone();
-  for row in rows.into_iter() {
-    println!("{:?}", row);
-  }
-  database::load_playlist_store(&rows, &playlist_store_rc);
-  database::load_facet_store(&r, &facet_store_rc);
+
+  database::load_playlist_store(rows.iter(), &playlist_store_rc);
+  database::load_facet_store(&r, &facet_store);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -218,7 +202,30 @@ fn app_main(application: &Application) {
     name: "Recently played".to_string(),
   }));
 
-  facet.connect_setup(move |_factory, item| setup_col(item));
+  facet_sel_rc.connect_selection_changed(move |_, _, _| {
+    let selection = facet_sel_rc1.selection();
+    let (iter, first_pos) = gtk::BitsetIter::init_first(&selection).unwrap();
+    playlist_store_rc1.remove_all();
+    let item = get_selection(&facet_sel_rc1, first_pos);
+    let r: Ref<Facet> = item.borrow();
+    let con = rows
+      .iter()
+      .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+
+    database::load_playlist_store(con, &playlist_store_rc);
+
+    for pos in iter {
+      let item = get_selection(&facet_sel_rc1, pos);
+      let r: Ref<Facet> = item.borrow();
+      let con = rows
+        .iter()
+        .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+
+      database::load_playlist_store(con, &playlist_store_rc);
+    }
+  });
+
+  facet.connect_setup(|_factory, item| setup_col(item));
   facet.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Facet> = obj.borrow();
@@ -228,8 +235,8 @@ fn app_main(application: &Application) {
       } else {
         format!(
           "{} / {}",
-          r.album_artist.as_ref().unwrap_or(&"(Unknown)".to_string()),
-          r.album.as_ref().unwrap_or(&"(Unknown)".to_string()),
+          str_or_unknown(&r.album_artist),
+          str_or_unknown(&r.album),
         )
       },
     });
@@ -393,11 +400,13 @@ fn app_main(application: &Application) {
     }),
   );
 
+  let popover_menu = PopoverMenu::builder().child(child)
+
   let main_ui = Box::new(gtk::Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
-  wnd.set_child(Some(&main_ui));
-  wnd.show();
+  wnd_rc.set_child(Some(&main_ui));
+  wnd_rc.show();
 }
 
 #[macro_use]
@@ -416,7 +425,7 @@ mod tests {
     time_test!();
     let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
     let tracks = load_all().unwrap();
-    load_playlist_store(&tracks, &playlist_store);
+    load_playlist_store(&tracks.iter(), &playlist_store);
     println!("{}", playlist_store.n_items());
     assert_eq!(playlist_store.n_items(), 23332);
   }

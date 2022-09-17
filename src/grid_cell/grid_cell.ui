@@ -2,7 +2,7 @@
 <interface>
   <template class="GridCell" parent="GtkWidget">
     <child>
-      <object class="GtkLabel" id="name">
+      <object class="GtkInscription" id="name">
         <property name="xalign">0</property>
       </object>
     </child>

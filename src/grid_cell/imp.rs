@@ -9,7 +9,10 @@ use gtk::CompositeTemplate;
 #[template(file = "grid_cell.ui")]
 pub struct GridCell {
   #[template_child]
-  pub name: TemplateChild<gtk::Label>,
+  // gtk::Inscription requires gtk>=4.8. If you target an older version of gtk, you should switch
+  // to gtk::Label. The benefits for using gtk::Inscription are explained here
+  // https://gtk-rs.org/gtk4-rs/git/docs/gtk4/struct.Inscription.html
+  pub name: TemplateChild<gtk::Inscription>,
 }
 
 #[glib::object_subclass]
@@ -19,8 +22,8 @@ impl ObjectSubclass for GridCell {
   type ParentType = gtk::Widget;
 
   fn class_init(klass: &mut Self::Class) {
-    // users can either set a layout manager (as below) or override the size_allocate / measure
-    // functions of the WidgetImpl trait.
+    // When inheriting from GtkWidget directly, you have to either override the size_allocate/measure
+    // functions of WidgetImpl trait or use a layout manager which provides those functions for your widgets like below.
     klass.set_layout_manager_type::<BinLayout>();
     klass.bind_template();
   }
