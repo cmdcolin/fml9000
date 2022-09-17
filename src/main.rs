@@ -3,17 +3,16 @@ mod grid_cell;
 mod load_css;
 mod play_track;
 
-use crate::grid_cell::Entry;
-use crate::grid_cell::GridCell;
+use crate::grid_cell::{Entry, GridCell};
 use database::{Facet, Track};
-use gtk::glib;
-use gtk::glib::BoxedAnyObject;
+use gtk::gdk;
+use gtk::gio;
+use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
-use gtk::PopoverMenu;
 use gtk::{
-  gdk, gio, Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, Image,
-  ListItem, MultiSelection, Paned, Scale, ScrolledWindow, SearchEntry, SelectionModel,
-  SignalListItemFactory, SingleSelection, VolumeButton,
+  Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, GestureClick, Image,
+  ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry,
+  SelectionModel, SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use std::cell::Ref;
 use std::rc::Rc;
@@ -98,6 +97,9 @@ fn app_main(application: &Application) {
     .model(&playlist_mgr_store)
     .build();
 
+  let playlist_sel_rc = Rc::new(playlist_sel);
+  let playlist_sel_rc1 = playlist_sel_rc.clone();
+
   let facet_sel_rc = Rc::new(facet_sel);
   let facet_sel_rc1 = facet_sel_rc.clone();
 
@@ -163,6 +165,52 @@ fn app_main(application: &Application) {
   playlist_columnview.append_column(&playlist_col4);
   facet_columnview.append_column(&facet_col);
   playlist_mgr_columnview.append_column(&playlist_mgr_col);
+
+  let action = gio::SimpleAction::new("t1", None);
+  action.connect("activate", true, |_| {
+    println!("hello");
+    None
+  });
+  wnd_rc.add_action(&action);
+
+  let menu = gio::Menu::new();
+  menu.append(Some("t1"), Some("win.t1"));
+  menu.append(Some("t2"), Some("win.t2"));
+  let popover_menu = PopoverMenu::builder().build();
+  popover_menu.set_menu_model(Some(&menu));
+  popover_menu.set_has_arrow(false);
+  let popover_menu_rc = Rc::new(popover_menu);
+  let popover_menu_rc1 = popover_menu_rc.clone();
+  let gesture = GestureClick::new();
+  gesture.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
+  gesture.connect_released(move |gesture, a, x, y| {
+    gesture.set_state(gtk::EventSequenceState::Claimed);
+    let selection = playlist_sel_rc1.selection();
+
+    popover_menu_rc1.popup();
+    popover_menu_rc1.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 0, 0)));
+
+    //convert(b), convert(c));
+    // let (iter, first_pos) = gtk::BitsetIter::init_first(&selection).unwrap();
+    // let item = get_selection(&playlist_sel_rc1, first_pos);
+    // let r: Ref<Facet> = item.borrow();
+    // println!("{}", first_pos);
+    // let con = rows
+    //   .iter()
+    //   .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+
+    // database::load_playlist_store(con, &playlist_store_rc);
+
+    // for pos in iter {
+    //   let item = get_selection(&playlist_sel_rc1, pos);
+    //   let r: Ref<Facet> = item.borrow();
+    //   let con = rows
+    //     .iter()
+    //     .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+
+    //   database::load_playlist_store(con, &playlist_store_rc);
+    // }
+  });
 
   playlist_columnview.connect_activate(move |columnview, pos| {
     let selection = columnview.model().unwrap();
@@ -285,7 +333,7 @@ fn app_main(application: &Application) {
     .vexpand(true)
     .build();
 
-  let facet_box = Box::new(gtk::Orientation::Vertical, 0);
+  let facet_box = Box::new(Orientation::Vertical, 0);
   let search_bar = SearchEntry::builder().build();
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
@@ -305,21 +353,21 @@ fn app_main(application: &Application) {
 
   let ltopbottom = Paned::builder()
     .vexpand(true)
-    .orientation(gtk::Orientation::Vertical)
+    .orientation(Orientation::Vertical)
     .start_child(&facet_box)
     .end_child(&playlist_wnd)
     .build();
 
   let rtopbottom = Paned::builder()
     .vexpand(true)
-    .orientation(gtk::Orientation::Vertical)
+    .orientation(Orientation::Vertical)
     .start_child(&playlist_mgr_wnd)
     .end_child(&album_art)
     .build();
 
   let lrpane = Paned::builder()
     .hexpand(true)
-    .orientation(gtk::Orientation::Horizontal)
+    .orientation(Orientation::Horizontal)
     .start_child(&ltopbottom)
     .end_child(&rtopbottom)
     .build();
@@ -364,9 +412,9 @@ fn app_main(application: &Application) {
   let next_btn = Button::builder().child(&next_img).build();
   let prev_btn = Button::builder().child(&prev_img).build();
   let stop_btn = Button::builder().child(&stop_img).build();
-  let button_box = Box::new(gtk::Orientation::Horizontal, 0);
+  let button_box = Box::new(Orientation::Horizontal, 0);
   let seek_slider = Scale::new(
-    gtk::Orientation::Horizontal,
+    Orientation::Horizontal,
     Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
   );
   let volume_button = VolumeButton::new();
@@ -390,11 +438,11 @@ fn app_main(application: &Application) {
     }),
   );
 
-  // let popover_menu = PopoverMenu::builder().child(child)
-
-  let main_ui = Box::new(gtk::Orientation::Vertical, 0);
+  let main_ui = Box::new(Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
+  main_ui.add_controller(&gesture);
+  popover_menu_rc.set_parent(&main_ui);
   wnd_rc.set_child(Some(&main_ui));
   wnd_rc.show();
 }
