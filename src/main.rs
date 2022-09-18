@@ -82,16 +82,10 @@ fn app_main(application: &Application) {
   let playlist_mgr_store = gio::ListStore::new(BoxedAnyObject::static_type());
 
   let playlist_sel = MultiSelection::new(Some(&playlist_store));
-  let playlist_columnview = ColumnView::builder()
-    .model(&playlist_sel)
-    .enable_rubberband(true)
-    .build();
+  let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
 
   let facet_sel = MultiSelection::new(Some(&facet_store));
-  let facet_columnview = ColumnView::builder()
-    .model(&facet_sel)
-    .enable_rubberband(true)
-    .build();
+  let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
   let playlist_mgr_sel = SingleSelection::builder()
     .model(&playlist_mgr_store)
@@ -166,16 +160,20 @@ fn app_main(application: &Application) {
   facet_columnview.append_column(&facet_col);
   playlist_mgr_columnview.append_column(&playlist_mgr_col);
 
-  let action = gio::SimpleAction::new("t1", None);
-  action.connect("activate", true, |_| {
-    println!("hello");
-    None
+  let action1 = gio::SimpleAction::new("add_to_playlist", None);
+  action1.connect_activate(|_, _| {
+    // println!("hello2 {:?} {:?}", a1, args);
   });
-  wnd_rc.add_action(&action);
+  wnd_rc.add_action(&action1);
+  let action2 = gio::SimpleAction::new("properties", None);
+  action2.connect_activate(|_, _| {
+    // println!("hello {:?} {:?}", a1, args);
+  });
+  wnd_rc.add_action(&action2);
 
   let menu = gio::Menu::new();
-  menu.append(Some("t1"), Some("win.t1"));
-  menu.append(Some("t2"), Some("win.t2"));
+  menu.append(Some("Add to new playlist"), Some("win.add_to_playlist"));
+  menu.append(Some("Properties"), Some("win.properties"));
   let popover_menu = PopoverMenu::builder().build();
   popover_menu.set_menu_model(Some(&menu));
   popover_menu.set_has_arrow(false);
@@ -183,7 +181,7 @@ fn app_main(application: &Application) {
   let popover_menu_rc1 = popover_menu_rc.clone();
   let gesture = GestureClick::new();
   gesture.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
-  gesture.connect_released(move |gesture, a, x, y| {
+  gesture.connect_released(move |gesture, _, x, y| {
     gesture.set_state(gtk::EventSequenceState::Claimed);
     let selection = playlist_sel_rc1.selection();
 
@@ -329,7 +327,6 @@ fn app_main(application: &Application) {
 
   let facet_wnd = ScrolledWindow::builder()
     .child(&facet_columnview)
-    .kinetic_scrolling(false)
     .vexpand(true)
     .build();
 
@@ -340,7 +337,6 @@ fn app_main(application: &Application) {
 
   let playlist_wnd = ScrolledWindow::builder()
     .child(&playlist_columnview)
-    .kinetic_scrolling(false)
     .build();
 
   let playlist_mgr_wnd = ScrolledWindow::builder()
