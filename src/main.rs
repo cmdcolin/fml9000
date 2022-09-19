@@ -84,6 +84,17 @@ fn app_main(application: &Application) {
   let playlist_sel = MultiSelection::new(Some(&playlist_store));
   let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
 
+  let source = gtk::DragSource::new();
+  source.connect_drag_begin(|_, _| {
+    println!("k1");
+  });
+
+  source.connect_drag_end(|_, _, _| {
+    println!("k2");
+  });
+
+  playlist_columnview.add_controller(&source);
+
   let facet_sel = MultiSelection::new(Some(&facet_store));
   let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
@@ -279,6 +290,22 @@ fn app_main(application: &Application) {
   artistalbum.connect_setup(move |_factory, item| setup_col(item));
   artistalbum.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
+    // let p = cell.parent().unwrap();
+    // let dt = gtk::DropTarget::builder()
+    //   .name("playlist-drop-target")
+    //   .actions(gdk::DragAction::COPY)
+    //   .build();
+
+    // let ds = gtk::DragSource::new();
+
+    // p.add_controller(&ds);
+    // p.add_controller(&dt);
+    // ds.connect_drag_begin(|_, _| println!("test"));
+    // dt.connect_drop(|a, b, c, d| {
+    //   println!("t {:?} {:?} {:?} {:?}", a, b, c, d);
+    //   true
+    // });
+
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!(
