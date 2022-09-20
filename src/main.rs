@@ -1,7 +1,6 @@
 mod database;
 mod grid_cell;
 mod load_css;
-mod play_track;
 
 use crate::grid_cell::{Entry, GridCell};
 use database::{Facet, Track};
@@ -14,20 +13,15 @@ use gtk::{
   ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry,
   SelectionModel, SignalListItemFactory, SingleSelection, VolumeButton,
 };
+use rodio::{source::Source, Decoder, OutputStream, Sink};
 use std::cell::Ref;
+use std::cell::RefCell;
+use std::fs::File;
+use std::io::BufReader;
 use std::rc::Rc;
-use std::sync::mpsc;
-use std::thread;
 
 struct Playlist {
   name: String,
-}
-
-fn main() {
-  let app = Application::new(Some("com.github.fml9000"), Default::default());
-
-  app.connect_activate(app_main);
-  app.run();
 }
 
 fn str_or_unknown(str: &Option<String>) -> String {
@@ -56,15 +50,23 @@ fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyOb
   sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
 }
 
-fn app_main(application: &Application) {
-  let (tx, rx) = mpsc::channel();
-  let thread = thread::Builder::new()
-    .name("music_player_thread".to_string())
-    .spawn(move || match rx.recv() {
-      Ok(received) => play_track::play_track(received),
-      Err(e) => println!("{}", e),
-    });
+fn main() {
+  let app = Application::new(Some("com.github.fml9000"), Default::default());
 
+  // Play beep
+  let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+  let sink = Sink::try_new(&stream_handle).unwrap();
+
+  // container to allow it to be used in callbacks inside app_main
+  // https://stackoverflow.com/questions/65041598/ also see
+  // https://github.com/RustAudio/rodio/issues/381 have to initialize this in main, not app_main
+  let sink_rc = Rc::new(RefCell::new(sink));
+
+  app.connect_activate(move |a| app_main(&a, sink_rc.clone()));
+  app.run();
+}
+
+fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -194,31 +196,10 @@ fn app_main(application: &Application) {
   gesture.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
   gesture.connect_released(move |gesture, _, x, y| {
     gesture.set_state(gtk::EventSequenceState::Claimed);
-    let selection = playlist_sel_rc1.selection();
+    let _selection = playlist_sel_rc1.selection();
 
     popover_menu_rc1.popup();
     popover_menu_rc1.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 0, 0)));
-
-    //convert(b), convert(c));
-    // let (iter, first_pos) = gtk::BitsetIter::init_first(&selection).unwrap();
-    // let item = get_selection(&playlist_sel_rc1, first_pos);
-    // let r: Ref<Facet> = item.borrow();
-    // println!("{}", first_pos);
-    // let con = rows
-    //   .iter()
-    //   .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
-
-    // database::load_playlist_store(con, &playlist_store_rc);
-
-    // for pos in iter {
-    //   let item = get_selection(&playlist_sel_rc1, pos);
-    //   let r: Ref<Facet> = item.borrow();
-    //   let con = rows
-    //     .iter()
-    //     .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
-
-    //   database::load_playlist_store(con, &playlist_store_rc);
-    // }
   });
 
   playlist_columnview.connect_activate(move |columnview, pos| {
@@ -226,13 +207,18 @@ fn app_main(application: &Application) {
     let item = get_playlist_activate_selection(&selection, pos);
     let r: Ref<Rc<Track>> = item.borrow();
     let f = r.filename.clone();
-    tx.send(f.to_string());
+
+    println!("{}", f);
+    let file = BufReader::new(File::open(f).unwrap());
+    let source = Decoder::new(file).unwrap();
+    sink.borrow().append(source);
+
     wnd_rc_1.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
       str_or_unknown(&r.artist),
       str_or_unknown(&r.album),
       str_or_unknown(&r.title),
-    )))
+    )));
   });
 
   let rows = Rc::new(database::load_all().unwrap());
@@ -290,28 +276,12 @@ fn app_main(application: &Application) {
   artistalbum.connect_setup(move |_factory, item| setup_col(item));
   artistalbum.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
-    // let p = cell.parent().unwrap();
-    // let dt = gtk::DropTarget::builder()
-    //   .name("playlist-drop-target")
-    //   .actions(gdk::DragAction::COPY)
-    //   .build();
-
-    // let ds = gtk::DragSource::new();
-
-    // p.add_controller(&ds);
-    // p.add_controller(&dt);
-    // ds.connect_drag_begin(|_, _| println!("test"));
-    // dt.connect_drop(|a, b, c, d| {
-    //   println!("t {:?} {:?} {:?} {:?}", a, b, c, d);
-    //   true
-    // });
-
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
       name: format!(
         "{} / {}",
-        r.album.as_ref().unwrap_or(&"".to_string()),
-        r.artist.as_ref().unwrap_or(&"".to_string()),
+        str_or_unknown(&r.album),
+        str_or_unknown(&r.artist),
       ),
     });
   });
@@ -455,9 +425,8 @@ fn app_main(application: &Application) {
   pause_btn.connect_closure(
     "clicked",
     false,
-    glib::closure_local!(move |button: Button| {
-      // Set the label to "Hello World!" after the button has been clicked on
-      button.set_label("Hello World!");
+    glib::closure_local!(move |_: Button| {
+      // player_rc1.set_playing(false);
     }),
   );
 
