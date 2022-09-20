@@ -54,14 +54,14 @@ fn main() {
   let app = Application::new(Some("com.github.fml9000"), Default::default());
   let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
-  let stream_handle_rc = Rc::new(RefCell::new(stream_handle));
+  let stream_handle_rc = Rc::new(stream_handle);
   app.connect_activate(move |application| {
     app_main(&application, &stream_handle_rc);
   });
   app.run();
 }
 
-fn app_main(application: &gtk::Application, stream_handle: &Rc<RefCell<OutputStreamHandle>>) {
+fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandle>) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -70,10 +70,8 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<RefCell<OutputStr
     .build();
   let wnd_rc = Rc::new(wnd);
   let wnd_rc_1 = wnd_rc.clone();
-  let stream_handle_borrow = stream_handle.borrow();
   let stream_handle_clone = stream_handle.clone();
-  let sink_refcell = RefCell::new(Sink::try_new(&stream_handle_borrow).unwrap());
-  // let sink_rc = Rc::new(RefCell::new(sink));
+  let sink_refcell = RefCell::new(Sink::try_new(&stream_handle).unwrap());
 
   // database::run_scan();
   load_css::load_css();
@@ -211,11 +209,15 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<RefCell<OutputStr
     let file = BufReader::new(File::open(f).unwrap());
     let source = Decoder::new(file).unwrap();
 
-    let sink = sink_refcell.borrow();
+    let mut sink = sink_refcell.borrow_mut();
     if !sink.empty() {
       sink.stop();
     }
-    sink_refcell.replace_with(|_| rodio::Sink::try_new(&stream_handle_clone.borrow()).unwrap());
+
+    // kill and recreate sink, xref
+    // https://github.com/betta-cyber/netease-music-tui/pull/27/
+    // https://github.com/RustAudio/rodio/issues/315
+    *sink = rodio::Sink::try_new(&stream_handle_clone).unwrap();
     sink.append(source);
     sink.play();
 
