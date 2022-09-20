@@ -5,15 +5,15 @@ mod load_css;
 use crate::grid_cell::{Entry, GridCell};
 use database::{Facet, Track};
 use gtk::gdk;
-use gtk::gio;
+use gtk::gio::{self, ListStore};
 use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use gtk::{
-  Application, ApplicationWindow, Box, Button, ColumnView, ColumnViewColumn, GestureClick, Image,
+  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick, Image,
   ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry,
   SelectionModel, SignalListItemFactory, SingleSelection, VolumeButton,
 };
-use rodio::{source::Source, Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::Ref;
 use std::cell::RefCell;
 use std::fs::File;
@@ -52,21 +52,16 @@ fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyOb
 
 fn main() {
   let app = Application::new(Some("com.github.fml9000"), Default::default());
-
-  // Play beep
   let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-  let sink = Sink::try_new(&stream_handle).unwrap();
 
-  // container to allow it to be used in callbacks inside app_main
-  // https://stackoverflow.com/questions/65041598/ also see
-  // https://github.com/RustAudio/rodio/issues/381 have to initialize this in main, not app_main
-  let sink_rc = Rc::new(RefCell::new(sink));
-
-  app.connect_activate(move |a| app_main(&a, sink_rc.clone()));
+  let stream_handle_rc = Rc::new(RefCell::new(stream_handle));
+  app.connect_activate(move |application| {
+    app_main(&application, &stream_handle_rc);
+  });
   app.run();
 }
 
-fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
+fn app_main(application: &gtk::Application, stream_handle: &Rc<RefCell<OutputStreamHandle>>) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -75,13 +70,17 @@ fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
     .build();
   let wnd_rc = Rc::new(wnd);
   let wnd_rc_1 = wnd_rc.clone();
+  let stream_handle_borrow = stream_handle.borrow();
+  let stream_handle_clone = stream_handle.clone();
+  let sink_refcell = RefCell::new(Sink::try_new(&stream_handle_borrow).unwrap());
+  // let sink_rc = Rc::new(RefCell::new(sink));
 
   // database::run_scan();
   load_css::load_css();
 
-  let facet_store = gio::ListStore::new(BoxedAnyObject::static_type());
-  let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
-  let playlist_mgr_store = gio::ListStore::new(BoxedAnyObject::static_type());
+  let facet_store = ListStore::new(BoxedAnyObject::static_type());
+  let playlist_store = ListStore::new(BoxedAnyObject::static_type());
+  let playlist_mgr_store = ListStore::new(BoxedAnyObject::static_type());
 
   let playlist_sel = MultiSelection::new(Some(&playlist_store));
   let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
@@ -211,7 +210,14 @@ fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
     println!("{}", f);
     let file = BufReader::new(File::open(f).unwrap());
     let source = Decoder::new(file).unwrap();
-    sink.borrow().append(source);
+
+    let sink = sink_refcell.borrow();
+    if !sink.empty() {
+      sink.stop();
+    }
+    sink_refcell.replace_with(|_| rodio::Sink::try_new(&stream_handle_clone.borrow()).unwrap());
+    sink.append(source);
+    sink.play();
 
     wnd_rc_1.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
@@ -327,7 +333,7 @@ fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
     .vexpand(true)
     .build();
 
-  let facet_box = Box::new(Orientation::Vertical, 0);
+  let facet_box = gtk::Box::new(Orientation::Vertical, 0);
   let search_bar = SearchEntry::builder().build();
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
@@ -405,7 +411,7 @@ fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
   let next_btn = Button::builder().child(&next_img).build();
   let prev_btn = Button::builder().child(&prev_img).build();
   let stop_btn = Button::builder().child(&stop_img).build();
-  let button_box = Box::new(Orientation::Horizontal, 0);
+  let button_box = gtk::Box::new(Orientation::Horizontal, 0);
   let seek_slider = Scale::new(
     Orientation::Horizontal,
     Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
@@ -430,7 +436,7 @@ fn app_main(application: &gtk::Application, sink: Rc<RefCell<Sink>>) {
     }),
   );
 
-  let main_ui = Box::new(Orientation::Vertical, 0);
+  let main_ui = gtk::Box::new(Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
   main_ui.add_controller(&gesture);
