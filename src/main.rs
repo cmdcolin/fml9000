@@ -9,9 +9,10 @@ use gtk::gio::{self, ListStore};
 use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use gtk::{
-  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick, Image,
-  ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry,
-  SelectionModel, SignalListItemFactory, SingleSelection, VolumeButton,
+  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, FileChooserAction,
+  FileChooserDialog, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
+  PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel,
+  SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::Ref;
@@ -50,8 +51,10 @@ fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyOb
   sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
 }
 
+const APP_ID: &str = "com.github.fml9000";
+
 fn main() {
-  let app = Application::new(Some("com.github.fml9000"), Default::default());
+  let app = Application::builder().application_id(APP_ID).build();
   let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
   let stream_handle_rc = Rc::new(stream_handle);
@@ -69,9 +72,12 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .title("fml9000")
     .build();
   let wnd_rc = Rc::new(wnd);
-  let wnd_rc_1 = wnd_rc.clone();
+  let wnd_rc1 = wnd_rc.clone();
+  let wnd_rc2 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
-  let sink_refcell = RefCell::new(Sink::try_new(&stream_handle).unwrap());
+  let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
+
+  let sink_refcell_rc1 = sink_refcell_rc.clone();
 
   // database::run_scan();
   load_css::load_css();
@@ -209,7 +215,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     let file = BufReader::new(File::open(f).unwrap());
     let source = Decoder::new(file).unwrap();
 
-    let mut sink = sink_refcell.borrow_mut();
+    let mut sink = sink_refcell_rc.borrow_mut();
     if !sink.empty() {
       sink.stop();
     }
@@ -221,7 +227,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     sink.append(source);
     sink.play();
 
-    wnd_rc_1.set_title(Some(&format!(
+    wnd_rc1.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
       str_or_unknown(&r.artist),
       str_or_unknown(&r.album),
@@ -408,20 +414,38 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let stop_img = Image::new();
   stop_img.set_from_pixbuf(Some(&pixbuf));
 
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(include_bytes!("img/settings.svg")).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let settings_img = Image::new();
+  settings_img.set_from_pixbuf(Some(&pixbuf));
+
   let play_btn = Button::builder().child(&play_img).build();
   let pause_btn = Button::builder().child(&pause_img).build();
   let next_btn = Button::builder().child(&next_img).build();
   let prev_btn = Button::builder().child(&prev_img).build();
   let stop_btn = Button::builder().child(&stop_img).build();
+  let settings_btn = Button::builder().child(&settings_img).build();
+
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
   let seek_slider = Scale::new(
     Orientation::Horizontal,
     Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
   );
+
   let volume_button = VolumeButton::new();
+  volume_button.connect_adjustment_notify(|val| {
+    println!("{}", val);
+  });
+  volume_button.connect_value_changed(move |_, volume| {
+    let sink = sink_refcell_rc1.borrow();
+    sink.set_volume(volume as f32);
+  });
   volume_button.set_value(1.0);
   seek_slider.set_hexpand(true);
 
+  button_box.append(&settings_btn);
   button_box.append(&seek_slider);
   button_box.append(&play_btn);
   button_box.append(&pause_btn);
@@ -438,6 +462,10 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     }),
   );
 
+  settings_btn.connect_clicked(move |_| {
+    gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&wnd_rc2)));
+  });
+
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
@@ -447,34 +475,35 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   wnd_rc.show();
 }
 
-#[macro_use]
-extern crate time_test;
-#[cfg(test)]
-mod tests {
-  use crate::database::load_all;
-  use crate::database::load_facet_store;
-  use crate::database::load_playlist_store;
-  use gtk::gio;
-  use gtk::glib::BoxedAnyObject;
-  use gtk::prelude::*;
+async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>) {
+  let preferences_dialog = gtk::Dialog::builder()
+    .transient_for(&*wnd)
+    .modal(true)
+    .title("Preferences")
+    .build();
+  let content_area = preferences_dialog.content_area();
+  let open_button = Button::builder().label("Open folder...").build();
+  content_area.append(&open_button);
+  let wnd_rc2 = wnd.clone();
+  open_button.connect_clicked(move |_| {
+    let file_chooser = FileChooserDialog::new(
+      Some("Open Folder"),
+      Some(&*wnd_rc2),
+      FileChooserAction::SelectFolder,
+      &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
+    );
 
-  #[test]
-  fn test_playlist_store() {
-    time_test!();
-    let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
-    let tracks = load_all().unwrap();
-    load_playlist_store(&tracks.iter(), &playlist_store);
-    println!("{}", playlist_store.n_items());
-    assert_eq!(playlist_store.n_items(), 23332);
-  }
+    file_chooser.connect_response(move |d: &FileChooserDialog, response: ResponseType| {
+      if response == ResponseType::Ok {
+        let file = d.file().expect("Couldn't get file");
+        println!("{}", file);
+      }
+      d.close();
+    });
 
-  #[test]
-  fn load_facet() {
-    time_test!();
-    let playlist_store = gio::ListStore::new(BoxedAnyObject::static_type());
-    let tracks = load_all().unwrap();
-    load_facet_store(&tracks, &playlist_store);
-    println!("{}", playlist_store.n_items());
-    assert_eq!(playlist_store.n_items(), 2265);
-  }
+    file_chooser.show();
+  });
+
+  let answer = preferences_dialog.run_future().await;
+  preferences_dialog.close();
 }
