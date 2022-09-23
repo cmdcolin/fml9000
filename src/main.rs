@@ -10,7 +10,7 @@ use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use gtk::{
   Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, FileChooserAction,
-  FileChooserDialog, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
+  FileChooserNative, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
   PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel,
   SignalListItemFactory, SingleSelection, VolumeButton,
 };
@@ -463,7 +463,25 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   );
 
   settings_btn.connect_clicked(move |_| {
-    gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&wnd_rc2)));
+    let file_chooser = FileChooserNative::new(
+      Some("Open Folder"),
+      Some(&*wnd_rc2),
+      FileChooserAction::Open,
+      None,
+      None,
+    );
+    file_chooser.set_modal(true);
+    file_chooser.set_transient_for(Some(&*wnd_rc2));
+
+    file_chooser.connect_response(move |d: &FileChooserNative, response: ResponseType| {
+      if response == ResponseType::Ok {
+        let file = d.file().expect("Couldn't get file");
+        println!("{}", file);
+      }
+    });
+    println!("ii");
+    file_chooser.show();
+    // gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&wnd_rc2)));
   });
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
@@ -481,29 +499,14 @@ async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>) {
     .modal(true)
     .title("Preferences")
     .build();
+
   let content_area = preferences_dialog.content_area();
   let open_button = Button::builder().label("Open folder...").build();
   content_area.append(&open_button);
+  let preferences_dialog_rc = Rc::new(preferences_dialog);
+  let preferences_dialog_rc1 = preferences_dialog_rc.clone();
   let wnd_rc2 = wnd.clone();
-  open_button.connect_clicked(move |_| {
-    let file_chooser = FileChooserDialog::new(
-      Some("Open Folder"),
-      Some(&*wnd_rc2),
-      FileChooserAction::SelectFolder,
-      &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
-    );
+  open_button.connect_clicked(move |_| {});
 
-    file_chooser.connect_response(move |d: &FileChooserDialog, response: ResponseType| {
-      if response == ResponseType::Ok {
-        let file = d.file().expect("Couldn't get file");
-        println!("{}", file);
-      }
-      d.close();
-    });
-
-    file_chooser.show();
-  });
-
-  let answer = preferences_dialog.run_future().await;
-  preferences_dialog.close();
+  preferences_dialog_rc.show();
 }
