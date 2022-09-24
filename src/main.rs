@@ -125,7 +125,6 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let sink_refcell_rc1 = sink_refcell_rc.clone();
   let settings_rc = Rc::new(RefCell::new(read_settings()));
 
-  // database::run_scan();
   load_css::load_css();
 
   let facet_store = ListStore::new(BoxedAnyObject::static_type());
@@ -291,11 +290,22 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     )));
   });
 
-  let rows = Rc::new(database::load_all().unwrap());
-  let r = rows.clone();
+  let rows_rc = Rc::new(database::load_all().unwrap());
+  let rows_rc1 = rows_rc.clone();
+  let rows_rc2 = rows_rc.clone();
 
-  database::load_playlist_store(rows.iter(), &playlist_store_rc);
-  database::load_facet_store(&r, &facet_store);
+  {
+    let s = settings_rc.borrow();
+    match &s.folder {
+      Some(folder) => {
+        database::run_scan(&folder, &rows_rc2);
+      }
+      None => {}
+    }
+  }
+
+  database::load_playlist_store(rows_rc.iter(), &playlist_store_rc);
+  database::load_facet_store(&rows_rc1, &facet_store);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -309,7 +319,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     playlist_store_rc1.remove_all();
     let item = get_selection(&facet_sel_rc1, first_pos);
     let r: Ref<Facet> = item.borrow();
-    let con = rows
+    let con = rows_rc
       .iter()
       .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
 
@@ -318,7 +328,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     for pos in iter {
       let item = get_selection(&facet_sel_rc1, pos);
       let r: Ref<Facet> = item.borrow();
-      let con = rows
+      let con = rows_rc
         .iter()
         .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
 

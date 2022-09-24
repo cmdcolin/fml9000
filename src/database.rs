@@ -75,28 +75,42 @@ pub fn process_file(tx: &Transaction, path: &str) -> Result<(), rusqlite::Error>
     Err(_) => Ok(()),
   }
 }
+fn hashset(data: &Vec<Rc<Track>>) -> HashSet<&std::string::String> {
+  HashSet::from_iter(data.iter().map(|elt| &elt.filename))
+}
 
-pub fn init_db() -> Result<Connection, rusqlite::Error> {
+const MAX_VAL: i32 = 10000000;
+
+pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) -> Result<Connection, rusqlite::Error> {
+  let hash = hashset(rows);
   let mut conn = connect_db(rusqlite::OpenFlags::default())?;
   let mut i = 0;
+  let mut j = 0;
+  let mut k = 0;
   let transaction_size = 20;
 
   for chunk in chunked_iterator::ChunkedIterator::new(
-    WalkDir::new("/home/cdiesh/Music")
-      .into_iter()
-      .filter_map(|e| e.ok()),
+    WalkDir::new(folder).into_iter().filter_map(|e| e.ok()),
     transaction_size,
   ) {
     let tx = conn.transaction()?;
     for file in chunk {
-      if file.file_type().is_file() && i < 10000 {
+      if file.file_type().is_file() && i < MAX_VAL {
         let path = file.path();
-        process_file(&tx, &path.display().to_string())?;
+        let s = path.display().to_string();
+        if !hash.contains(&s) {
+          process_file(&tx, &s)?;
+          k += 1;
+        } else {
+          j += 1;
+        }
         i = i + 1;
       }
     }
     tx.commit()?
   }
+
+  println!("found already: {}. new: {}", j, k);
   Ok(conn)
 }
 
@@ -152,8 +166,4 @@ pub fn load_facet_store(rows: &[Rc<Track>], facet_store: &gio::ListStore) {
   for uniq in v {
     facet_store.append(&BoxedAnyObject::new(uniq))
   }
-}
-
-pub fn run_scan() {
-  init_db();
 }
