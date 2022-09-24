@@ -4,6 +4,7 @@ mod load_css;
 
 use crate::grid_cell::{GridCell, GridEntry};
 use database::{Facet, Track};
+use directories::ProjectDirs;
 use gtk::gdk;
 use gtk::gio::{self, ListStore};
 use gtk::glib::{self, BoxedAnyObject};
@@ -11,19 +12,31 @@ use gtk::prelude::*;
 use gtk::{
   Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Entry, FileChooserAction,
   FileChooserDialog, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
-  PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel, Settings,
+  PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel,
   SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
-use std::cell::Ref;
-use std::cell::RefCell;
+use serde_derive::{Deserialize, Serialize};
+use std::cell::{Ref, RefCell};
 use std::fs::File;
 use std::io::BufReader;
+use std::io::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
 
 struct Playlist {
   name: String,
+}
+
+fn default_volume() -> f64 {
+  1.0
+}
+
+#[derive(Serialize, Deserialize)]
+struct FmlSettings {
+  folder: Option<String>,
+  #[serde(default = "default_volume")]
+  volume: f64,
 }
 
 fn str_or_unknown(str: &Option<String>) -> String {
@@ -65,6 +78,37 @@ fn main() {
   app.run();
 }
 
+fn read_settings() -> FmlSettings {
+  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
+  let path = proj_dirs.config_dir().join("config.toml");
+
+  match std::fs::read_to_string(&path) {
+    Ok(conf) => {
+      let config: FmlSettings = toml::from_str(&conf).unwrap();
+      config
+    }
+    Err(_) => FmlSettings {
+      folder: None,
+      volume: 1.0,
+    },
+  }
+}
+
+fn write_settings(settings: &FmlSettings) -> std::io::Result<()> {
+  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
+  let path = proj_dirs.config_dir();
+
+  std::fs::create_dir_all(path)?;
+
+  let toml = toml::to_string(&settings).unwrap();
+  let mut f = std::fs::OpenOptions::new()
+    .create(true)
+    .truncate(true)
+    .write(true)
+    .open(path.join("config.toml"))?;
+  write!(f, "{}", toml)
+}
+
 fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandle>) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
@@ -72,13 +116,14 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .application(application)
     .title("fml9000")
     .build();
+
   let wnd_rc = Rc::new(wnd);
   let wnd_rc1 = wnd_rc.clone();
   let wnd_rc2 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
-
   let sink_refcell_rc1 = sink_refcell_rc.clone();
+  let settings_rc = Rc::new(RefCell::new(read_settings()));
 
   // database::run_scan();
   load_css::load_css();
@@ -442,14 +487,23 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   );
 
   let volume_button = VolumeButton::new();
-  volume_button.connect_adjustment_notify(|val| {
-    println!("{}", val);
-  });
+  let settings_rc1 = settings_rc.clone();
   volume_button.connect_value_changed(move |_, volume| {
     let sink = sink_refcell_rc1.borrow();
     sink.set_volume(volume as f32);
+    let mut s = settings_rc1.borrow_mut();
+    s.volume = volume;
+    write_settings(&s).expect("Failed to write");
   });
-  volume_button.set_value(1.0);
+
+  // force the borrow to be let go using the scope, otherwise the
+  // volume_button.connect_value_changed is immediately called after volume_button.set_value and
+  // produces BorrowMutError
+  let volume = {
+    let s = settings_rc.borrow();
+    s.volume
+  };
+  volume_button.set_value(volume);
   seek_slider.set_hexpand(true);
 
   button_box.append(&settings_btn);
@@ -470,7 +524,8 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   );
 
   settings_btn.connect_clicked(move |_| {
-    gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&wnd_rc2)));
+    gtk::glib::MainContext::default()
+      .spawn_local(dialog(Rc::clone(&wnd_rc2), Rc::clone(&settings_rc)));
   });
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
@@ -482,7 +537,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   wnd_rc.show();
 }
 
-async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>) {
+async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>, settings: Rc<RefCell<FmlSettings>>) {
   let preferences_dialog = gtk::Dialog::builder()
     .transient_for(&*wnd)
     .modal(true)
@@ -493,29 +548,38 @@ async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>) {
 
   let content_area = preferences_dialog.content_area();
   let open_button = Button::builder().label("Open folder...").build();
-  let textbox = Entry::builder().text("Testing").build();
+  let s = { settings.borrow().folder.clone() };
+  let textbox = Entry::builder()
+    .text(s.as_ref().unwrap_or(&"Empty".to_string()))
+    .build();
 
   content_area.append(&textbox);
   content_area.append(&open_button);
   let preferences_dialog_rc = Rc::new(preferences_dialog);
-  open_button.connect_clicked(glib::clone!(@weak wnd, @weak textbox => move |_| {
-    let file_chooser = FileChooserDialog::new(
-      Some("Open Folder"),
-      Some(&*wnd),
-      FileChooserAction::SelectFolder,
-      &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
-    );
-    file_chooser.set_modal(true);
-    file_chooser.connect_response(move |d: &FileChooserDialog, response: ResponseType| {
-      if response == ResponseType::Ok {
-        let file = d.file().expect("Couldn't get file");
-        let p = file.path().expect("Couldn't get file path");
-        textbox.set_text(&p.to_string_lossy());
-      }
-      d.close();
-    });
-    file_chooser.show();
-  }));
+  open_button.connect_clicked(
+    glib::clone!(@weak wnd, @weak textbox, @weak settings => move |_| {
+      let file_chooser = FileChooserDialog::new(
+        Some("Open Folder"),
+        Some(&*wnd),
+        FileChooserAction::SelectFolder,
+        &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
+      );
+      file_chooser.set_modal(true);
+      file_chooser.connect_response(move |d: &FileChooserDialog, response: ResponseType| {
+        if response == ResponseType::Ok {
+          let file = d.file().expect("Couldn't get file");
+          let p = file.path().expect("Couldn't get file path");
+          let folder = &p.to_string_lossy();
+          textbox.set_text(folder);
+          let mut s = settings.borrow_mut();
+          s.folder = Some(folder.to_string());
+          write_settings(&s).expect("Failed to write");
+        }
+        d.close();
+      });
+      file_chooser.show();
+    }),
+  );
 
-  preferences_dialog_rc.show();
+  preferences_dialog_rc.run_future().await;
 }

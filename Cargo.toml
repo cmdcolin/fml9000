@@ -12,5 +12,7 @@ rusqlite = { version = "0.28", features = ["bundled"] }
 lofty = "0.8"
 walkdir = "2"
 log = { version = "0.4", features = ["release_max_level_info"] }
-time-test = "0.2"
-
+toml = "0.5"
+serde_derive = "1"
+serde = "1"
+directories = "4.0"
