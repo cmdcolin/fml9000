@@ -13,7 +13,7 @@ impl Default for GridCell {
   }
 }
 
-pub struct Entry {
+pub struct GridEntry {
   pub name: String,
 }
 
@@ -22,7 +22,7 @@ impl GridCell {
     glib::Object::new(&[]).expect("Failed to create GridCell")
   }
 
-  pub fn set_entry(&self, entry: &Entry) {
+  pub fn set_entry(&self, entry: &GridEntry) {
     self.imp().name.set_text(&entry.name);
   }
 }

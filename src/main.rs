@@ -2,16 +2,16 @@ mod database;
 mod grid_cell;
 mod load_css;
 
-use crate::grid_cell::{Entry, GridCell};
+use crate::grid_cell::{GridCell, GridEntry};
 use database::{Facet, Track};
 use gtk::gdk;
 use gtk::gio::{self, ListStore};
 use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use gtk::{
-  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, FileChooserAction,
-  FileChooserNative, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
-  PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel,
+  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Entry, FileChooserAction,
+  FileChooserDialog, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
+  PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel, Settings,
   SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
@@ -285,7 +285,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   facet.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Facet> = obj.borrow();
-    cell.set_entry(&Entry {
+    cell.set_entry(&GridEntry {
       name: if r.all {
         "(All)".to_string()
       } else {
@@ -302,7 +302,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   artistalbum.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&Entry {
+    cell.set_entry(&GridEntry {
       name: format!(
         "{} / {}",
         str_or_unknown(&r.album),
@@ -315,7 +315,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   track.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&Entry {
+    cell.set_entry(&GridEntry {
       name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
     });
   });
@@ -324,7 +324,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   title.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&Entry {
+    cell.set_entry(&GridEntry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     });
   });
@@ -333,7 +333,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   filename.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&Entry {
+    cell.set_entry(&GridEntry {
       name: r.filename.to_string(),
     });
   });
@@ -342,7 +342,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   playlist_mgr.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Playlist> = obj.borrow();
-    cell.set_entry(&Entry {
+    cell.set_entry(&GridEntry {
       name: r.name.to_string(),
     });
   });
@@ -470,25 +470,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   );
 
   settings_btn.connect_clicked(move |_| {
-    let file_chooser = FileChooserNative::new(
-      Some("Open Folder"),
-      Some(&*wnd_rc2),
-      FileChooserAction::Open,
-      None,
-      None,
-    );
-    file_chooser.set_modal(true);
-    file_chooser.set_transient_for(Some(&*wnd_rc2));
-
-    file_chooser.connect_response(move |d: &FileChooserNative, response: ResponseType| {
-      if response == ResponseType::Ok {
-        let file = d.file().expect("Couldn't get file");
-        println!("{}", file);
-      }
-    });
-    println!("ii");
-    file_chooser.show();
-    // gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&wnd_rc2)));
+    gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&wnd_rc2)));
   });
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
@@ -504,16 +486,36 @@ async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>) {
   let preferences_dialog = gtk::Dialog::builder()
     .transient_for(&*wnd)
     .modal(true)
+    .default_width(800)
+    .default_height(600)
     .title("Preferences")
     .build();
 
   let content_area = preferences_dialog.content_area();
   let open_button = Button::builder().label("Open folder...").build();
+  let textbox = Entry::builder().text("Testing").build();
+
+  content_area.append(&textbox);
   content_area.append(&open_button);
   let preferences_dialog_rc = Rc::new(preferences_dialog);
-  let preferences_dialog_rc1 = preferences_dialog_rc.clone();
-  let wnd_rc2 = wnd.clone();
-  open_button.connect_clicked(move |_| {});
+  open_button.connect_clicked(glib::clone!(@weak wnd, @weak textbox => move |_| {
+    let file_chooser = FileChooserDialog::new(
+      Some("Open Folder"),
+      Some(&*wnd),
+      FileChooserAction::SelectFolder,
+      &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
+    );
+    file_chooser.set_modal(true);
+    file_chooser.connect_response(move |d: &FileChooserDialog, response: ResponseType| {
+      if response == ResponseType::Ok {
+        let file = d.file().expect("Couldn't get file");
+        let p = file.path().expect("Couldn't get file path");
+        textbox.set_text(&p.to_string_lossy());
+      }
+      d.close();
+    });
+    file_chooser.show();
+  }));
 
   preferences_dialog_rc.show();
 }
