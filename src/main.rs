@@ -19,6 +19,7 @@ use std::cell::Ref;
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 struct Playlist {
@@ -106,6 +107,11 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let playlist_mgr_sel = SingleSelection::builder()
     .model(&playlist_mgr_store)
     .build();
+
+  let album_art = Image::builder().build();
+
+  let album_art_rc = Rc::new(album_art);
+  let album_art_rc1 = album_art_rc.clone();
 
   let playlist_sel_rc = Rc::new(playlist_sel);
   let playlist_sel_rc1 = playlist_sel_rc.clone();
@@ -209,10 +215,10 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     let selection = columnview.model().unwrap();
     let item = get_playlist_activate_selection(&selection, pos);
     let r: Ref<Rc<Track>> = item.borrow();
-    let f = r.filename.clone();
+    let f1 = r.filename.clone();
+    let f2 = r.filename.clone();
 
-    println!("{}", f);
-    let file = BufReader::new(File::open(f).unwrap());
+    let file = BufReader::new(File::open(f1).unwrap());
     let source = Decoder::new(file).unwrap();
 
     let mut sink = sink_refcell_rc.borrow_mut();
@@ -226,6 +232,11 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     *sink = rodio::Sink::try_new(&stream_handle_clone).unwrap();
     sink.append(source);
     sink.play();
+
+    let mut p = PathBuf::from(f2);
+    p.pop();
+    p.push("cover.jpg");
+    album_art_rc1.set_from_file(Some(p));
 
     wnd_rc1.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
@@ -354,10 +365,6 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .child(&playlist_mgr_columnview)
     .build();
 
-  let album_art = Image::builder()
-    .file("/home/cdiesh/src/fml9000/cover.jpg")
-    .build();
-
   let ltopbottom = Paned::builder()
     .vexpand(true)
     .orientation(Orientation::Vertical)
@@ -369,7 +376,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .vexpand(true)
     .orientation(Orientation::Vertical)
     .start_child(&playlist_mgr_wnd)
-    .end_child(&album_art)
+    .end_child(&*album_art_rc)
     .build();
 
   let lrpane = Paned::builder()
