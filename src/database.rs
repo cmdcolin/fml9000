@@ -1,5 +1,6 @@
 mod chunked_iterator;
 
+use directories::ProjectDirs;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use lofty::{Accessor, ItemKey, Probe};
@@ -26,11 +27,9 @@ pub struct Facet {
   pub all: bool,
 }
 
-pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> {
-  let conn = Connection::open_with_flags("test.db", args)?;
-
-  match conn.execute(
-    "CREATE TABLE tracks (
+pub fn init_db(conn: &Connection) -> Result<usize> {
+  conn.execute(
+    "CREATE TABLE IF NOT EXISTS tracks (
         id INTEGER NOT NULL PRIMARY KEY,
         filename VARCHAR NOT NULL,
         title VARCHAR,
@@ -41,11 +40,14 @@ pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Err
         album_artist VARCHAR
       )",
     (),
-  ) {
-    Ok(_) => println!("Created new DB"),
-    Err(e) => eprintln!("{}", e),
-  }
+  )
+}
 
+pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> {
+  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
+  let path = proj_dirs.config_dir().join("library.db");
+  let conn = Connection::open_with_flags(path, args)?;
+  init_db(&conn)?;
   Ok(conn)
 }
 
@@ -85,8 +87,6 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) -> Result<Connection, rusql
   let hash = hashset(rows);
   let mut conn = connect_db(rusqlite::OpenFlags::default())?;
   let mut i = 0;
-  let mut j = 0;
-  let mut k = 0;
   let transaction_size = 20;
 
   for chunk in chunked_iterator::ChunkedIterator::new(
@@ -100,9 +100,6 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) -> Result<Connection, rusql
         let s = path.display().to_string();
         if !hash.contains(&s) {
           process_file(&tx, &s)?;
-          k += 1;
-        } else {
-          j += 1;
         }
         i = i + 1;
       }
@@ -110,12 +107,11 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) -> Result<Connection, rusql
     tx.commit()?
   }
 
-  println!("found already: {}. new: {}", j, k);
   Ok(conn)
 }
 
 pub fn load_all() -> Result<Vec<Rc<Track>>, rusqlite::Error> {
-  let conn = connect_db(rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+  let conn = connect_db(rusqlite::OpenFlags::default())?;
   let mut stmt =
     conn.prepare("SELECT filename,title,artist,album_artist,album,genre,track FROM tracks")?;
 

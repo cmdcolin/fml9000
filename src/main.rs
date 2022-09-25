@@ -11,8 +11,8 @@ use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use gtk::{
   Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Entry, FileChooserAction,
-  FileChooserDialog, GestureClick, Image, ListItem, MultiSelection, Orientation, Paned,
-  PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel,
+  FileChooserDialog, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection, Orientation,
+  Paned, PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut,
   SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
@@ -120,9 +120,12 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let wnd_rc = Rc::new(wnd);
   let wnd_rc1 = wnd_rc.clone();
   let wnd_rc2 = wnd_rc.clone();
+  let wnd_rc3 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
+  let sink_refcell_rc2 = sink_refcell_rc.clone();
+  let sink_refcell_rc3 = sink_refcell_rc.clone();
   let settings_rc = Rc::new(RefCell::new(read_settings()));
 
   load_css::load_css();
@@ -152,7 +155,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .model(&playlist_mgr_store)
     .build();
 
-  let album_art = Image::builder().build();
+  let album_art = Image::builder().vexpand(true).build();
 
   let album_art_rc = Rc::new(album_art);
   let album_art_rc1 = album_art_rc.clone();
@@ -174,6 +177,21 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let track = SignalListItemFactory::new();
   let facet = SignalListItemFactory::new();
   let playlist_mgr = SignalListItemFactory::new();
+
+  let trigger = KeyvalTrigger::new(gtk::gdk::Key::space, gtk::gdk::ModifierType::empty());
+  let shortcut = Shortcut::builder().trigger(&trigger).build();
+  shortcut.connect_action_notify(|_| {
+    println!("tt");
+  });
+  shortcut.connect_trigger_notify(|_| {
+    println!("tt2");
+  });
+
+  let evk = gtk::EventControllerKey::new(); //builder().
+  evk.connect_key_pressed(|a, b, c, d| {
+    println!("{:?} {} {} {}", a, b, c, d);
+    gtk::Inhibit(true)
+  });
 
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
@@ -315,24 +333,29 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
 
   facet_sel_rc.connect_selection_changed(move |_, _, _| {
     let selection = facet_sel_rc1.selection();
-    let (iter, first_pos) = gtk::BitsetIter::init_first(&selection).unwrap();
-    playlist_store_rc1.remove_all();
-    let item = get_selection(&facet_sel_rc1, first_pos);
-    let r: Ref<Facet> = item.borrow();
-    let con = rows_rc
-      .iter()
-      .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+    match gtk::BitsetIter::init_first(&selection) {
+      Some(result) => {
+        let (iter, first_pos) = result;
+        playlist_store_rc1.remove_all();
+        let item = get_selection(&facet_sel_rc1, first_pos);
+        let r: Ref<Facet> = item.borrow();
+        let con = rows_rc
+          .iter()
+          .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
 
-    database::load_playlist_store(con, &playlist_store_rc);
+        database::load_playlist_store(con, &playlist_store_rc);
 
-    for pos in iter {
-      let item = get_selection(&facet_sel_rc1, pos);
-      let r: Ref<Facet> = item.borrow();
-      let con = rows_rc
-        .iter()
-        .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+        for pos in iter {
+          let item = get_selection(&facet_sel_rc1, pos);
+          let r: Ref<Facet> = item.borrow();
+          let con = rows_rc
+            .iter()
+            .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
 
-      database::load_playlist_store(con, &playlist_store_rc);
+          database::load_playlist_store(con, &playlist_store_rc);
+        }
+      }
+      None => { /* empty selection */ }
     }
   });
 
@@ -345,7 +368,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
         "(All)".to_string()
       } else {
         format!(
-          "{} / {}",
+          "{} // {}",
           str_or_unknown(&r.album_artist),
           str_or_unknown(&r.album),
         )
@@ -359,9 +382,9 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&GridEntry {
       name: format!(
-        "{} / {}",
-        str_or_unknown(&r.album),
+        "{} // {}",
         str_or_unknown(&r.artist),
+        str_or_unknown(&r.album),
       ),
     });
   });
@@ -500,20 +523,16 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let settings_rc1 = settings_rc.clone();
   volume_button.connect_value_changed(move |_, volume| {
     let sink = sink_refcell_rc1.borrow();
-    sink.set_volume(volume as f32);
     let mut s = settings_rc1.borrow_mut();
     s.volume = volume;
     write_settings(&s).expect("Failed to write");
+    sink.set_volume(volume as f32);
   });
 
-  // force the borrow to be let go using the scope, otherwise the
-  // volume_button.connect_value_changed is immediately called after volume_button.set_value and
-  // produces BorrowMutError
-  let volume = {
+  volume_button.set_value({
     let s = settings_rc.borrow();
     s.volume
-  };
-  volume_button.set_value(volume);
+  });
   seek_slider.set_hexpand(true);
 
   button_box.append(&settings_btn);
@@ -525,13 +544,15 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   button_box.append(&stop_btn);
   button_box.append(&volume_button);
 
-  pause_btn.connect_closure(
-    "clicked",
-    false,
-    glib::closure_local!(move |_: Button| {
-      // player_rc1.set_playing(false);
-    }),
-  );
+  pause_btn.connect_clicked(move |_| {
+    let sink = sink_refcell_rc2.borrow();
+    sink.pause();
+  });
+
+  play_btn.connect_clicked(move |_| {
+    let sink = sink_refcell_rc3.borrow();
+    sink.play();
+  });
 
   settings_btn.connect_clicked(move |_| {
     gtk::glib::MainContext::default()
@@ -556,15 +577,20 @@ async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>, settings: Rc<RefCell<FmlSetting
     .title("Preferences")
     .build();
 
+  let folder_box = gtk::Box::new(Orientation::Horizontal, 0);
+
   let content_area = preferences_dialog.content_area();
   let open_button = Button::builder().label("Open folder...").build();
   let s = { settings.borrow().folder.clone() };
   let textbox = Entry::builder()
     .text(s.as_ref().unwrap_or(&"Empty".to_string()))
+    .hexpand(true)
     .build();
 
-  content_area.append(&textbox);
-  content_area.append(&open_button);
+  folder_box.append(&textbox);
+  folder_box.append(&open_button);
+  content_area.append(&folder_box);
+
   let preferences_dialog_rc = Rc::new(preferences_dialog);
   open_button.connect_clicked(
     glib::clone!(@weak wnd, @weak textbox, @weak settings => move |_| {
