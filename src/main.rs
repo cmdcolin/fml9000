@@ -6,14 +6,14 @@ use crate::grid_cell::{GridCell, GridEntry};
 use database::{Facet, Track};
 use directories::ProjectDirs;
 use gtk::gdk;
-use gtk::gio::{self, ListStore};
+use gtk::gio::{self, ListStore, SimpleAction};
 use gtk::glib::{self, BoxedAnyObject};
 use gtk::prelude::*;
 use gtk::{
   Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Entry, FileChooserAction,
   FileChooserDialog, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection, Orientation,
   Paned, PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut,
-  SignalListItemFactory, SingleSelection, VolumeButton,
+  ShortcutAction, SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use serde_derive::{Deserialize, Serialize};
@@ -120,7 +120,6 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let wnd_rc = Rc::new(wnd);
   let wnd_rc1 = wnd_rc.clone();
   let wnd_rc2 = wnd_rc.clone();
-  let wnd_rc3 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
@@ -178,20 +177,29 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let facet = SignalListItemFactory::new();
   let playlist_mgr = SignalListItemFactory::new();
 
-  let trigger = KeyvalTrigger::new(gtk::gdk::Key::space, gtk::gdk::ModifierType::empty());
-  let shortcut = Shortcut::builder().trigger(&trigger).build();
-  shortcut.connect_action_notify(|_| {
-    println!("tt");
+  let pauseplay_action = SimpleAction::new("pauseplay", None);
+  pauseplay_action.connect_activate(|a, b| {
+    println!("pauseplay {:?} {:?}", a, b);
   });
-  shortcut.connect_trigger_notify(|_| {
-    println!("tt2");
+  wnd_rc.add_action(&pauseplay_action);
+
+  let pauseplay_shortcut = ShortcutAction::parse_string("action(win.pauseplay)").unwrap();
+  pauseplay_action.connect_activate(|_, _| {});
+  let trigger = KeyvalTrigger::new(gtk::gdk::Key::space, gtk::gdk::ModifierType::empty());
+  let shortcut = Shortcut::builder()
+    .trigger(&trigger)
+    .action(&pauseplay_shortcut)
+    .build();
+  let shortcut_controller = gtk::ShortcutController::new();
+  shortcut_controller.add_shortcut(&shortcut);
+  shortcut_controller.connect_scope_notify(|_| {
+    println!("here");
   });
 
-  let evk = gtk::EventControllerKey::new(); //builder().
-  evk.connect_key_pressed(|a, b, c, d| {
-    println!("{:?} {} {} {}", a, b, c, d);
-    gtk::Inhibit(true)
+  shortcut_controller.connect_mnemonic_modifiers_notify(|_| {
+    println!("here2");
   });
+  wnd_rc.add_controller(&shortcut_controller);
 
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
@@ -244,12 +252,12 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   facet_columnview.append_column(&facet_col);
   playlist_mgr_columnview.append_column(&playlist_mgr_col);
 
-  let action1 = gio::SimpleAction::new("add_to_playlist", None);
+  let action1 = SimpleAction::new("add_to_playlist", None);
   action1.connect_activate(|_, _| {
     // println!("hello2 {:?} {:?}", a1, args);
   });
   wnd_rc.add_action(&action1);
-  let action2 = gio::SimpleAction::new("properties", None);
+  let action2 = SimpleAction::new("properties", None);
   action2.connect_activate(|_, _| {
     // println!("hello {:?} {:?}", a1, args);
   });
