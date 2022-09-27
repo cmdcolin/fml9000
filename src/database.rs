@@ -30,8 +30,7 @@ pub struct Facet {
 pub fn init_db(conn: &Connection) -> Result<usize> {
   conn.execute(
     "CREATE TABLE IF NOT EXISTS tracks (
-        id INTEGER NOT NULL PRIMARY KEY,
-        filename VARCHAR NOT NULL,
+        filename VARCHAR NOT NULL PRIMARY KEY,
         title VARCHAR,
         artist VARCHAR,
         track VARCHAR,
@@ -45,7 +44,7 @@ pub fn init_db(conn: &Connection) -> Result<usize> {
 
   conn.execute(
     "CREATE TABLE IF NOT EXISTS recently_played (
-        id INTEGER NOT NULL PRIMARY KEY,
+        filename VARCHAR NOT NULL PRIMARY KEY,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       )",
     (),
@@ -117,6 +116,13 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) -> Result<Connection, rusql
   }
 
   Ok(conn)
+}
+
+pub fn add_track_to_recently_played(path: &str) -> Result<(), rusqlite::Error> {
+  let conn = connect_db(rusqlite::OpenFlags::default())?;
+  conn.execute("INSERT INTO recently_played (filename) VALUES (?)", (path,))?;
+
+  Ok(())
 }
 
 pub fn load_all() -> Result<Vec<Rc<Track>>, rusqlite::Error> {

@@ -4,24 +4,22 @@ mod load_css;
 mod preferences_dialog;
 mod settings;
 
-use crate::grid_cell::{GridCell, GridEntry};
 use database::{Facet, Track};
-use directories::ProjectDirs;
+use grid_cell::{GridCell, GridEntry};
 use gtk::gdk;
 use gtk::gio::{self, ListStore, SimpleAction};
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick, Image,
-  KeyvalTrigger, ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow,
-  SearchEntry, SelectionModel, Shortcut, ShortcutAction, SignalListItemFactory, SingleSelection,
-  VolumeButton,
+  Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick,
+  Image, KeyvalTrigger, ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale,
+  ScrolledWindow, SearchEntry, SelectionModel, Shortcut, ShortcutAction, SignalListItemFactory,
+  SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
-use settings::FmlSettings;
 use std::cell::{Ref, RefCell};
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::BufReader;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -80,21 +78,6 @@ fn main() {
     app_main(&application, &stream_handle_rc);
   });
   app.run();
-}
-
-fn write_settings(settings: &FmlSettings) -> std::io::Result<()> {
-  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
-  let path = proj_dirs.config_dir();
-
-  std::fs::create_dir_all(path)?;
-
-  let toml = toml::to_string(&settings).unwrap();
-  let mut f = std::fs::OpenOptions::new()
-    .create(true)
-    .truncate(true)
-    .write(true)
-    .open(path.join("config.toml"))?;
-  write!(f, "{}", toml)
 }
 
 fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandle>) {
@@ -275,6 +258,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     let r: Ref<Rc<Track>> = item.borrow();
     let f1 = r.filename.clone();
     let f2 = r.filename.clone();
+    let f3 = r.filename.clone();
 
     let file = BufReader::new(File::open(f1).unwrap());
     let source = Decoder::new(file).unwrap();
@@ -290,6 +274,8 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     *sink = rodio::Sink::try_new(&stream_handle_clone).unwrap();
     sink.append(source);
     sink.play();
+
+    crate::database::add_track_to_recently_played(&f3);
 
     let mut p = PathBuf::from(f2);
     p.pop();
@@ -320,6 +306,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
 
   database::load_playlist_store(rows_rc.iter(), &playlist_store_rc);
   database::load_facet_store(&rows_rc1, &facet_store);
+  // let facet_filter = gtk::FilterListModel::new(&facet_store, &filter);
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -428,6 +415,10 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
 
   let facet_box = gtk::Box::new(Orientation::Vertical, 0);
   let search_bar = SearchEntry::builder().build();
+
+  search_bar.connect_search_changed(|s| {
+    let text = s.text();
+  });
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
 
@@ -468,26 +459,26 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let settings_btn = create_button(&load_img(include_bytes!("img/settings.svg")));
 
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
-  let seek_slider = Scale::new(
-    Orientation::Horizontal,
-    Some(&gtk::Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0)),
-  );
+  let seek_slider = Scale::builder()
+    .hexpand(true)
+    .orientation(Orientation::Horizontal)
+    .adjustment(&Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0))
+    .build();
 
-  let volume_button = VolumeButton::new();
+  let volume_button = VolumeButton::builder()
+    .value({
+      let s = settings_rc.borrow();
+      s.volume
+    })
+    .build();
   let settings_rc1 = settings_rc.clone();
   volume_button.connect_value_changed(move |_, volume| {
     let sink = sink_refcell_rc1.borrow();
     let mut s = settings_rc1.borrow_mut();
     s.volume = volume;
-    write_settings(&s).expect("Failed to write");
+    crate::settings::write_settings(&s).expect("Failed to write");
     sink.set_volume(volume as f32);
   });
-
-  volume_button.set_value({
-    let s = settings_rc.borrow();
-    s.volume
-  });
-  seek_slider.set_hexpand(true);
 
   button_box.append(&settings_btn);
   button_box.append(&seek_slider);
