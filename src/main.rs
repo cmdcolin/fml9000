@@ -19,8 +19,7 @@ use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use serde_derive::{Deserialize, Serialize};
 use std::cell::{Ref, RefCell};
 use std::fs::File;
-use std::io::BufReader;
-use std::io::Write;
+use std::io::{BufReader, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -63,6 +62,20 @@ fn get_selection(sel: &MultiSelection, pos: u32) -> BoxedAnyObject {
 
 fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyObject {
   sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
+}
+
+fn load_img(a: &[u8]) -> Image {
+  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
+  loader.write(a).unwrap();
+  loader.close().unwrap();
+  let pixbuf = loader.pixbuf().unwrap();
+  let img = Image::new();
+  img.set_from_pixbuf(Some(&pixbuf));
+  img
+}
+
+fn create_button(img: &Image) -> Button {
+  Button::builder().child(img).build()
 }
 
 const APP_ID: &str = "com.github.fml9000";
@@ -472,54 +485,12 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .end_child(&rtopbottom)
     .build();
 
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(include_bytes!("img/play.svg")).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let play_img = Image::new();
-  play_img.set_from_pixbuf(Some(&pixbuf));
-
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(include_bytes!("img/pause.svg")).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let pause_img = Image::new();
-  pause_img.set_from_pixbuf(Some(&pixbuf));
-
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(include_bytes!("img/next.svg")).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let next_img = Image::new();
-  next_img.set_from_pixbuf(Some(&pixbuf));
-
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(include_bytes!("img/prev.svg")).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let prev_img = Image::new();
-  prev_img.set_from_pixbuf(Some(&pixbuf));
-
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(include_bytes!("img/stop.svg")).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let stop_img = Image::new();
-  stop_img.set_from_pixbuf(Some(&pixbuf));
-
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(include_bytes!("img/settings.svg")).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let settings_img = Image::new();
-  settings_img.set_from_pixbuf(Some(&pixbuf));
-
-  let play_btn = Button::builder().child(&play_img).build();
-  let pause_btn = Button::builder().child(&pause_img).build();
-  let next_btn = Button::builder().child(&next_img).build();
-  let prev_btn = Button::builder().child(&prev_img).build();
-  let stop_btn = Button::builder().child(&stop_img).build();
-  let settings_btn = Button::builder().child(&settings_img).build();
+  let prev_btn = create_button(&load_img(include_bytes!("img/prev.svg")));
+  let stop_btn = create_button(&load_img(include_bytes!("img/stop.svg")));
+  let next_btn = create_button(&load_img(include_bytes!("img/next.svg")));
+  let pause_btn = create_button(&load_img(include_bytes!("img/pause.svg")));
+  let play_btn = create_button(&load_img(include_bytes!("img/play.svg")));
+  let settings_btn = create_button(&load_img(include_bytes!("img/settings.svg")));
 
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
   let seek_slider = Scale::new(

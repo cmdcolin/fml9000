@@ -37,7 +37,16 @@ pub fn init_db(conn: &Connection) -> Result<usize> {
         track VARCHAR,
         album VARCHAR,
         genre VARCHAR,
-        album_artist VARCHAR
+        album_artist VARCHAR,
+        added DATETIME DEFAULT CURRENT_TIMESTAMP
+      )",
+    (),
+  )?;
+
+  conn.execute(
+    "CREATE TABLE IF NOT EXISTS recently_played (
+        id INTEGER NOT NULL PRIMARY KEY,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       )",
     (),
   )
