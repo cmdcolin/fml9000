@@ -16,11 +16,9 @@ use gtk::{
   ScrolledWindow, SearchEntry, SelectionModel, Shortcut, ShortcutAction, SignalListItemFactory,
   SingleSelection, VolumeButton,
 };
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::{Ref, RefCell};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 struct Playlist {
@@ -71,16 +69,14 @@ const APP_ID: &str = "com.github.fml9000";
 
 fn main() {
   let app = Application::builder().application_id(APP_ID).build();
-  let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
-  let stream_handle_rc = Rc::new(stream_handle);
   app.connect_activate(move |application| {
-    app_main(&application, &stream_handle_rc);
+    app_main(&application);
   });
   app.run();
 }
 
-fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandle>) {
+fn app_main(application: &gtk::Application) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -91,11 +87,6 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let wnd_rc = Rc::new(wnd);
   let wnd_rc1 = wnd_rc.clone();
   let wnd_rc2 = wnd_rc.clone();
-  let stream_handle_clone = stream_handle.clone();
-  let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
-  let sink_refcell_rc1 = sink_refcell_rc.clone();
-  let sink_refcell_rc2 = sink_refcell_rc.clone();
-  let sink_refcell_rc3 = sink_refcell_rc.clone();
   let settings_rc = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   load_css::load_css();
@@ -176,7 +167,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .expand(false)
     .resizable(true)
     .fixed_width(400)
-    .title("Artist / Album")
+    .title("Album / Artist")
     .factory(&artistalbum)
     .build();
 
@@ -233,10 +224,18 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     // println!("hello {:?} {:?}", a1, args);
   });
   wnd_rc.add_action(&action2);
+  let action3 = SimpleAction::new("open_containing", None);
+  action3.connect_activate(|a1, args| {
+    println!("hello {:?} {:?}", a1, args);
+    // let r = gio::AppInfo::launch_uris(None, &["file:///"], None);
+  });
+  wnd_rc.add_action(&action3);
 
   let menu = gio::Menu::new();
   menu.append(Some("Add to new playlist"), Some("win.add_to_playlist"));
   menu.append(Some("Properties"), Some("win.properties"));
+  menu.append(Some("Open containing folder"), Some("win.open_containing"));
+
   let popover_menu = PopoverMenu::builder().build();
   popover_menu.set_menu_model(Some(&menu));
   popover_menu.set_has_arrow(false);
@@ -246,7 +245,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   gesture.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
   gesture.connect_released(move |gesture, _, x, y| {
     gesture.set_state(gtk::EventSequenceState::Claimed);
-    let _selection = playlist_sel_rc1.selection();
+    let selection = playlist_sel_rc1.selection();
 
     popover_menu_rc1.popup();
     popover_menu_rc1.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 0, 0)));
@@ -261,26 +260,11 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     let f3 = r.filename.clone();
 
     let file = BufReader::new(File::open(f1).unwrap());
-    let source = Decoder::new(file).unwrap();
 
-    let mut sink = sink_refcell_rc.borrow_mut();
-    if !sink.empty() {
-      sink.stop();
-    }
-
-    // kill and recreate sink, xref
-    // https://github.com/betta-cyber/netease-music-tui/pull/27/
-    // https://github.com/RustAudio/rodio/issues/315
-    *sink = rodio::Sink::try_new(&stream_handle_clone).unwrap();
-    sink.append(source);
-    sink.play();
-
-    crate::database::add_track_to_recently_played(&f3);
-
-    let mut p = PathBuf::from(f2);
-    p.pop();
-    p.push("cover.jpg");
-    album_art_rc1.set_from_file(Some(p));
+    // let mut p = PathBuf::from(f2);
+    // p.pop();
+    // p.push("cover.jpg");
+    // album_art_rc1.set_from_file(Some(p));
 
     wnd_rc1.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
@@ -293,16 +277,6 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let rows_rc = Rc::new(database::load_all().unwrap());
   let rows_rc1 = rows_rc.clone();
   let rows_rc2 = rows_rc.clone();
-
-  {
-    let s = settings_rc.borrow();
-    match &s.folder {
-      Some(folder) => {
-        database::run_scan(&folder, &rows_rc2);
-      }
-      None => {}
-    }
-  }
 
   database::load_playlist_store(rows_rc.iter(), &playlist_store_rc);
   database::load_facet_store(&rows_rc1, &facet_store);
@@ -366,8 +340,8 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     cell.set_entry(&GridEntry {
       name: format!(
         "{} // {}",
-        str_or_unknown(&r.artist),
         str_or_unknown(&r.album),
+        str_or_unknown(&r.artist),
       ),
     });
   });
@@ -467,17 +441,17 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
 
   let volume_button = VolumeButton::builder()
     .value({
+      // in closure to make the borrow not last forever
       let s = settings_rc.borrow();
       s.volume
     })
     .build();
+
   let settings_rc1 = settings_rc.clone();
   volume_button.connect_value_changed(move |_, volume| {
-    let sink = sink_refcell_rc1.borrow();
     let mut s = settings_rc1.borrow_mut();
     s.volume = volume;
     crate::settings::write_settings(&s).expect("Failed to write");
-    sink.set_volume(volume as f32);
   });
 
   button_box.append(&settings_btn);
@@ -489,15 +463,9 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   button_box.append(&stop_btn);
   button_box.append(&volume_button);
 
-  pause_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc2.borrow();
-    sink.pause();
-  });
+  pause_btn.connect_clicked(move |_| {});
 
-  play_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc3.borrow();
-    sink.play();
-  });
+  play_btn.connect_clicked(move |_| {});
 
   settings_btn.connect_clicked(move |_| {
     gtk::glib::MainContext::default().spawn_local(crate::preferences_dialog::dialog(
