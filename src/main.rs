@@ -1,22 +1,24 @@
 mod database;
 mod grid_cell;
 mod load_css;
+mod preferences_dialog;
+mod settings;
 
 use crate::grid_cell::{GridCell, GridEntry};
 use database::{Facet, Track};
 use directories::ProjectDirs;
 use gtk::gdk;
 use gtk::gio::{self, ListStore, SimpleAction};
-use gtk::glib::{self, BoxedAnyObject};
+use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Entry, FileChooserAction,
-  FileChooserDialog, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection, Orientation,
-  Paned, PopoverMenu, ResponseType, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut,
-  ShortcutAction, SignalListItemFactory, SingleSelection, VolumeButton,
+  Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick, Image,
+  KeyvalTrigger, ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow,
+  SearchEntry, SelectionModel, Shortcut, ShortcutAction, SignalListItemFactory, SingleSelection,
+  VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
-use serde_derive::{Deserialize, Serialize};
+use settings::FmlSettings;
 use std::cell::{Ref, RefCell};
 use std::fs::File;
 use std::io::{BufReader, Write};
@@ -25,17 +27,6 @@ use std::rc::Rc;
 
 struct Playlist {
   name: String,
-}
-
-fn default_volume() -> f64 {
-  1.0
-}
-
-#[derive(Serialize, Deserialize)]
-struct FmlSettings {
-  folder: Option<String>,
-  #[serde(default = "default_volume")]
-  volume: f64,
 }
 
 fn str_or_unknown(str: &Option<String>) -> String {
@@ -91,22 +82,6 @@ fn main() {
   app.run();
 }
 
-fn read_settings() -> FmlSettings {
-  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
-  let path = proj_dirs.config_dir().join("config.toml");
-
-  match std::fs::read_to_string(&path) {
-    Ok(conf) => {
-      let config: FmlSettings = toml::from_str(&conf).unwrap();
-      config
-    }
-    Err(_) => FmlSettings {
-      folder: None,
-      volume: 1.0,
-    },
-  }
-}
-
 fn write_settings(settings: &FmlSettings) -> std::io::Result<()> {
   let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
   let path = proj_dirs.config_dir();
@@ -138,7 +113,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   let sink_refcell_rc1 = sink_refcell_rc.clone();
   let sink_refcell_rc2 = sink_refcell_rc.clone();
   let sink_refcell_rc3 = sink_refcell_rc.clone();
-  let settings_rc = Rc::new(RefCell::new(read_settings()));
+  let settings_rc = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   load_css::load_css();
 
@@ -534,8 +509,10 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   });
 
   settings_btn.connect_clicked(move |_| {
-    gtk::glib::MainContext::default()
-      .spawn_local(dialog(Rc::clone(&wnd_rc2), Rc::clone(&settings_rc)));
+    gtk::glib::MainContext::default().spawn_local(crate::preferences_dialog::dialog(
+      Rc::clone(&wnd_rc2),
+      Rc::clone(&settings_rc),
+    ));
   });
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
@@ -545,56 +522,4 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   popover_menu_rc.set_parent(&main_ui);
   wnd_rc.set_child(Some(&main_ui));
   wnd_rc.show();
-}
-
-async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>, settings: Rc<RefCell<FmlSettings>>) {
-  let preferences_dialog = gtk::Dialog::builder()
-    .transient_for(&*wnd)
-    .modal(true)
-    .default_width(800)
-    .default_height(600)
-    .title("Preferences")
-    .build();
-
-  let folder_box = gtk::Box::new(Orientation::Horizontal, 0);
-
-  let content_area = preferences_dialog.content_area();
-  let open_button = Button::builder().label("Open folder...").build();
-  let s = { settings.borrow().folder.clone() };
-  let textbox = Entry::builder()
-    .text(s.as_ref().unwrap_or(&"Empty".to_string()))
-    .hexpand(true)
-    .build();
-
-  folder_box.append(&textbox);
-  folder_box.append(&open_button);
-  content_area.append(&folder_box);
-
-  let preferences_dialog_rc = Rc::new(preferences_dialog);
-  open_button.connect_clicked(
-    glib::clone!(@weak wnd, @weak textbox, @weak settings => move |_| {
-      let file_chooser = FileChooserDialog::new(
-        Some("Open Folder"),
-        Some(&*wnd),
-        FileChooserAction::SelectFolder,
-        &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
-      );
-      file_chooser.set_modal(true);
-      file_chooser.connect_response(move |d: &FileChooserDialog, response: ResponseType| {
-        if response == ResponseType::Ok {
-          let file = d.file().expect("Couldn't get file");
-          let p = file.path().expect("Couldn't get file path");
-          let folder = &p.to_string_lossy();
-          textbox.set_text(folder);
-          let mut s = settings.borrow_mut();
-          s.folder = Some(folder.to_string());
-          write_settings(&s).expect("Failed to write");
-        }
-        d.close();
-      });
-      file_chooser.show();
-    }),
-  );
-
-  preferences_dialog_rc.run_future().await;
 }
