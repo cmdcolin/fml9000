@@ -9,8 +9,10 @@ use gtk::CompositeTemplate;
 #[template(file = "grid_cell.ui")]
 pub struct GridCell {
   #[template_child]
-  // can switch to inscription if we have gtk4.8
-  pub name: TemplateChild<gtk::Label>,
+  // gtk::Inscription requires gtk>=4.8. If you target an older version of gtk, you should switch
+  // to gtk::Label. The benefits for using gtk::Inscription are explained here
+  // https://gtk-rs.org/gtk4-rs/git/docs/gtk4/struct.Inscription.html
+  pub name: TemplateChild<gtk::Inscription>,
 }
 
 #[glib::object_subclass]
@@ -32,7 +34,7 @@ impl ObjectSubclass for GridCell {
 }
 
 impl ObjectImpl for GridCell {
-  fn dispose(&self, _widget: &Self::Type) {
+  fn dispose(&self) {
     self.name.unparent();
   }
 }

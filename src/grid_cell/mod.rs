@@ -3,8 +3,8 @@ use gtk::glib;
 use gtk::subclass::prelude::*;
 
 glib::wrapper! {
-  pub struct GridCell(ObjectSubclass<imp::GridCell>)
-    @extends gtk::Widget;
+    pub struct GridCell(ObjectSubclass<imp::GridCell>)
+        @extends gtk::Widget;
 }
 
 impl Default for GridCell {
@@ -13,16 +13,16 @@ impl Default for GridCell {
   }
 }
 
-pub struct GridEntry {
+pub struct Entry {
   pub name: String,
 }
 
 impl GridCell {
   pub fn new() -> Self {
-    glib::Object::new(&[]).expect("Failed to create GridCell")
+    glib::Object::new(&[])
   }
 
-  pub fn set_entry(&self, entry: &GridEntry) {
-    self.imp().name.set_text(&entry.name);
+  pub fn set_entry(&self, entry: &Entry) {
+    self.imp().name.set_text(Some(&entry.name));
   }
 }

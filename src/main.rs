@@ -5,10 +5,10 @@ mod preferences_dialog;
 mod settings;
 
 use database::{Facet, Track};
-use grid_cell::{GridCell, GridEntry};
+use grid_cell::{Entry, GridCell};
 use gtk::gdk;
 use gtk::gio::{self, ListStore, SimpleAction};
-use gtk::glib::BoxedAnyObject;
+use gtk::glib::{BoxedAnyObject, Object};
 use gtk::prelude::*;
 use gtk::{
   Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick,
@@ -31,14 +31,14 @@ fn str_or_unknown(str: &Option<String>) -> String {
   str.as_ref().unwrap_or(&"(Unknown)".to_string()).to_string()
 }
 
-fn setup_col(item: &ListItem) {
+fn setup_col(item: &Object) {
   item
     .downcast_ref::<ListItem>()
     .unwrap()
     .set_child(Some(&GridCell::new()));
 }
 
-fn get_cell(item: &ListItem) -> (GridCell, BoxedAnyObject) {
+fn get_cell(item: &Object) -> (GridCell, BoxedAnyObject) {
   let item = item.downcast_ref::<ListItem>().unwrap();
   let child = item.child().unwrap().downcast::<GridCell>().unwrap();
   let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
@@ -346,7 +346,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   facet.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Facet> = obj.borrow();
-    cell.set_entry(&GridEntry {
+    cell.set_entry(&Entry {
       name: if r.all {
         "(All)".to_string()
       } else {
@@ -363,7 +363,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   artistalbum.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&GridEntry {
+    cell.set_entry(&Entry {
       name: format!(
         "{} // {}",
         str_or_unknown(&r.artist),
@@ -376,7 +376,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   track.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&GridEntry {
+    cell.set_entry(&Entry {
       name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
     });
   });
@@ -385,7 +385,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   title.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&GridEntry {
+    cell.set_entry(&Entry {
       name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string())),
     });
   });
@@ -394,7 +394,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   filename.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&GridEntry {
+    cell.set_entry(&Entry {
       name: r.filename.to_string(),
     });
   });
@@ -403,7 +403,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
   playlist_mgr.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
     let r: Ref<Playlist> = obj.borrow();
-    cell.set_entry(&GridEntry {
+    cell.set_entry(&Entry {
       name: r.name.to_string(),
     });
   });

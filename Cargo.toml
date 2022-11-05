@@ -5,14 +5,15 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-rodio = "0.16.0"
-notify = "4"
-gtk = { version = "0.4", package = "gtk4", features = ["v4_8"] }
-rusqlite = { version = "0.28", features = ["bundled"] }
+directories = "4.0"
+gtk = { version = "0.5", package = "gtk4", features = ["v4_8"]  }
 lofty = "0.8"
-walkdir = "2"
-log = { version = "0.4", features = ["release_max_level_info"] }
-toml = "0.5"
+notify = "4"
+relm4 = "0.5.0-beta.4"
+relm4-components = "0.5.0-beta.4"
+rodio = "0.16.0"
+rusqlite = { version = "0.28", features = ["bundled"] }
 serde_derive = "1"
 serde = "1"
-directories = "4.0"
+toml = "0.5"
+walkdir = "2"
