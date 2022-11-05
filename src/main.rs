@@ -11,10 +11,10 @@ use gtk::gio::{self, ListStore, SimpleAction};
 use gtk::glib::{BoxedAnyObject, Object};
 use gtk::prelude::*;
 use gtk::{
-  Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, GestureClick,
-  Image, KeyvalTrigger, ListItem, MultiSelection, Orientation, Paned, PopoverMenu, Scale,
-  ScrolledWindow, SearchEntry, SelectionModel, Shortcut, ShortcutAction, SignalListItemFactory,
-  SingleSelection, VolumeButton,
+  Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Filter,
+  FilterListModel, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection, Orientation,
+  Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut, ShortcutAction,
+  SignalListItemFactory, SingleSelection, VolumeButton,
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::{Ref, RefCell};
@@ -70,7 +70,7 @@ fn create_button(img: &Image) -> Button {
 const APP_ID: &str = "com.github.fml9000";
 
 fn main() {
-  let app = Application::builder().application_id(APP_ID).build();
+  let app = adw::Application::builder().application_id(APP_ID).build();
   let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
   let stream_handle_rc = Rc::new(stream_handle);
@@ -80,7 +80,7 @@ fn main() {
   app.run();
 }
 
-fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandle>) {
+fn app_main(application: &adw::Application, stream_handle: &Rc<OutputStreamHandle>) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -176,7 +176,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .expand(false)
     .resizable(true)
     .fixed_width(400)
-    .title("Artist / Album")
+    .title("Album / Artist")
     .factory(&artistalbum)
     .build();
 
@@ -205,7 +205,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     .build();
 
   let facet_col = ColumnViewColumn::builder()
-    .title("X")
+    .title("Album Artist / Album")
     .factory(&facet)
     .expand(true)
     .build();
@@ -306,7 +306,7 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
 
   database::load_playlist_store(rows_rc.iter(), &playlist_store_rc);
   database::load_facet_store(&rows_rc1, &facet_store);
-  // let facet_filter = gtk::FilterListModel::new(&facet_store, &filter);
+  // let facet_filter = FilterListModel::new(Some(&facet_store), Some(&filter));
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -366,8 +366,8 @@ fn app_main(application: &gtk::Application, stream_handle: &Rc<OutputStreamHandl
     cell.set_entry(&Entry {
       name: format!(
         "{} // {}",
-        str_or_unknown(&r.artist),
         str_or_unknown(&r.album),
+        str_or_unknown(&r.artist),
       ),
     });
   });
