@@ -12,9 +12,9 @@ use gtk::glib::{BoxedAnyObject, MainContext, Object};
 use gtk::prelude::*;
 use gtk::{
   Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, CustomFilter,
-  FilterListModel, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection, Orientation,
-  Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut, ShortcutAction,
-  SignalListItemFactory, SingleSelection, VolumeButton,
+  CustomSorter, FilterListModel, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection,
+  Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut,
+  ShortcutAction, SignalListItemFactory, SingleSelection, SortListModel, VolumeButton,
 };
 use regex::Regex;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
@@ -101,12 +101,19 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   load_css::load_css();
 
+  let case_insensitive_sorter = CustomSorter::new(|obj1, obj2| {
+    let k1: Ref<Facet> = obj1.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
+    let k2: Ref<Facet> = obj2.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
+    let emp = "".to_string();
+    let t1 = k1.album_artist_or_artist.as_ref().unwrap_or(&emp);
+    let t2 = k2.album_artist_or_artist.as_ref().unwrap_or(&emp);
+    t1.to_lowercase().cmp(&t2.to_lowercase()).into()
+  });
+
   let filter = CustomFilter::new(|_| true);
   let facet_store = ListStore::new(BoxedAnyObject::static_type());
   let facet_filter = FilterListModel::new(Some(&facet_store), Some(&filter));
-  let facet_filter_rc = Rc::new(facet_filter);
-  let facet_filter_rc2 = facet_filter_rc.clone();
-  let facet_filter_rc3 = facet_filter_rc.clone();
+  let facet_sort = SortListModel::new(Some(&facet_filter), Some(&case_insensitive_sorter));
   let playlist_store = ListStore::new(BoxedAnyObject::static_type());
   let playlist_mgr_store = ListStore::new(BoxedAnyObject::static_type());
 
@@ -124,7 +131,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   playlist_columnview.add_controller(&source);
 
-  let facet_sel = MultiSelection::new(Some(&*facet_filter_rc3));
+  let facet_sel = MultiSelection::new(Some(&facet_sort));
   let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
   let playlist_mgr_sel = SingleSelection::builder()
@@ -214,6 +221,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .title("Album Artist / Album")
     .factory(&facet)
     .expand(true)
+    .sorter(&case_insensitive_sorter)
     .build();
 
   let playlist_mgr_col = ColumnViewColumn::builder()
@@ -439,7 +447,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
       };
       k0 || k1 || k2
     });
-    facet_filter_rc2.set_filter(Some(&filter))
+    facet_filter.set_filter(Some(&filter))
   });
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
