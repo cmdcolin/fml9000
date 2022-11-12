@@ -11,11 +11,12 @@ use gtk::gio::{self, ListStore, SimpleAction};
 use gtk::glib::{BoxedAnyObject, Object};
 use gtk::prelude::*;
 use gtk::{
-  Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, Filter,
+  Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, CustomFilter,
   FilterListModel, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection, Orientation,
   Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut, ShortcutAction,
   SignalListItemFactory, SingleSelection, VolumeButton,
 };
+use regex::Regex;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::{Ref, RefCell};
 use std::fs::File;
@@ -70,7 +71,7 @@ fn create_button(img: &Image) -> Button {
 const APP_ID: &str = "com.github.fml9000";
 
 fn main() {
-  let app = adw::Application::builder().application_id(APP_ID).build();
+  let app = Application::builder().application_id(APP_ID).build();
   let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
   let stream_handle_rc = Rc::new(stream_handle);
@@ -80,7 +81,7 @@ fn main() {
   app.run();
 }
 
-fn app_main(application: &adw::Application, stream_handle: &Rc<OutputStreamHandle>) {
+fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let wnd = ApplicationWindow::builder()
     .default_width(1200)
     .default_height(600)
@@ -100,7 +101,12 @@ fn app_main(application: &adw::Application, stream_handle: &Rc<OutputStreamHandl
 
   load_css::load_css();
 
+  let filter = CustomFilter::new(|_| true);
   let facet_store = ListStore::new(BoxedAnyObject::static_type());
+  let facet_filter = FilterListModel::new(Some(&facet_store), Some(&filter));
+  let facet_filter_rc = Rc::new(facet_filter);
+  let facet_filter_rc2 = facet_filter_rc.clone();
+  let facet_filter_rc3 = facet_filter_rc.clone();
   let playlist_store = ListStore::new(BoxedAnyObject::static_type());
   let playlist_mgr_store = ListStore::new(BoxedAnyObject::static_type());
 
@@ -118,7 +124,7 @@ fn app_main(application: &adw::Application, stream_handle: &Rc<OutputStreamHandl
 
   playlist_columnview.add_controller(&source);
 
-  let facet_sel = MultiSelection::new(Some(&facet_store));
+  let facet_sel = MultiSelection::new(Some(&*facet_filter_rc3));
   let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
   let playlist_mgr_sel = SingleSelection::builder()
@@ -306,7 +312,7 @@ fn app_main(application: &adw::Application, stream_handle: &Rc<OutputStreamHandl
 
   database::load_playlist_store(rows_rc.iter(), &playlist_store_rc);
   database::load_facet_store(&rows_rc1, &facet_store);
-  // let facet_filter = FilterListModel::new(Some(&facet_store), Some(&filter));
+
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
   }));
@@ -416,8 +422,23 @@ fn app_main(application: &adw::Application, stream_handle: &Rc<OutputStreamHandl
   let facet_box = gtk::Box::new(Orientation::Vertical, 0);
   let search_bar = SearchEntry::builder().build();
 
-  search_bar.connect_search_changed(|s| {
+  search_bar.connect_search_changed(move |s| {
     let text = s.text();
+    let re = Regex::new(&format!("(?i){}", regex::escape(text.as_str()))).unwrap();
+    let filter = CustomFilter::new(move |obj| {
+      let r = obj.downcast_ref::<BoxedAnyObject>().unwrap();
+      let k: Ref<Facet> = r.borrow();
+      let k1 = match &k.album {
+        Some(s) => re.is_match(&s),
+        None => false,
+      };
+      let k2 = match &k.album_artist {
+        Some(s) => re.is_match(&s),
+        None => false,
+      };
+      k1 || k2
+    });
+    facet_filter_rc2.set_filter(Some(&filter))
   });
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
