@@ -330,7 +330,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
         let r: Ref<Facet> = item.borrow();
         let con = rows_rc
           .iter()
-          .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+          .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
 
         database::load_playlist_store(con, &playlist_store_rc);
 
@@ -339,7 +339,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
           let r: Ref<Facet> = item.borrow();
           let con = rows_rc
             .iter()
-            .filter(|x| x.album_artist == r.album_artist && x.album == r.album);
+            .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
 
           database::load_playlist_store(con, &playlist_store_rc);
         }
@@ -358,7 +358,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
       } else {
         format!(
           "{} // {}",
-          str_or_unknown(&r.album_artist),
+          str_or_unknown(&r.album_artist_or_artist),
           str_or_unknown(&r.album),
         )
       },
@@ -432,7 +432,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
         Some(s) => re.is_match(&s),
         None => false,
       };
-      let k2 = match &k.album_artist {
+      let k2 = match &k.album_artist_or_artist {
         Some(s) => re.is_match(&s),
         None => false,
       };

@@ -5,7 +5,6 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-adw = { version = "0.2.0-alpha.2", package = "libadwaita" }
 directories = "4.0"
 gtk = { version = "0.5", package = "gtk4", features = ["v4_8"]  }
 lofty = "0.8"

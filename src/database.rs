@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 
 #[derive(Debug)]
 pub struct Track {
+  pub album_artist_or_artist: Option<String>,
   pub album_artist: Option<String>,
   pub album: Option<String>,
   pub artist: Option<String>,
@@ -22,6 +23,7 @@ pub struct Track {
 
 #[derive(Hash, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct Facet {
+  pub album_artist_or_artist: Option<String>,
   pub album_artist: Option<String>,
   pub album: Option<String>,
   pub all: bool,
@@ -132,11 +134,19 @@ pub fn load_all() -> Result<Vec<Rc<Track>>, rusqlite::Error> {
 
   let mut names = Vec::new();
   let rows = stmt.query_map([], |row| {
+    let artist: Option<String> = row.get(2)?;
+    let album_artist: Option<String> = row.get(3)?;
+    let artist_clone = artist.clone();
+    let album_artist_clone = album_artist.clone();
     Ok(Rc::new(Track {
       filename: row.get(0)?,
       title: row.get(1)?,
-      artist: row.get(2)?,
-      album_artist: row.get(3)?,
+      artist,
+      album_artist,
+      album_artist_or_artist: match album_artist_clone {
+        Some(s) => Some(s),
+        None => artist_clone,
+      },
       album: row.get(4)?,
       genre: row.get(5)?,
       track: row.get(6)?,
@@ -164,12 +174,14 @@ pub fn load_facet_store(rows: &[Rc<Track>], facet_store: &gio::ListStore) {
     facets.insert(Facet {
       album: row.album.clone(),
       album_artist: row.album_artist.clone(),
+      album_artist_or_artist: row.album_artist_or_artist.clone(),
       all: false,
     });
   }
   facet_store.append(&BoxedAnyObject::new(Facet {
     album: None,
     album_artist: None,
+    album_artist_or_artist: None,
     all: true,
   }));
   let mut v = Vec::from_iter(facets);
