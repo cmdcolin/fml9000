@@ -8,7 +8,7 @@ use database::{Facet, Track};
 use grid_cell::{Entry, GridCell};
 use gtk::gdk;
 use gtk::gio::{self, ListStore, SimpleAction};
-use gtk::glib::{BoxedAnyObject, Object};
+use gtk::glib::{BoxedAnyObject, MainContext, Object};
 use gtk::prelude::*;
 use gtk::{
   Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, CustomFilter,
@@ -428,6 +428,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     let filter = CustomFilter::new(move |obj| {
       let r = obj.downcast_ref::<BoxedAnyObject>().unwrap();
       let k: Ref<Facet> = r.borrow();
+      let k0 = k.all;
       let k1 = match &k.album {
         Some(s) => re.is_match(&s),
         None => false,
@@ -436,7 +437,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
         Some(s) => re.is_match(&s),
         None => false,
       };
-      k1 || k2
+      k0 || k1 || k2
     });
     facet_filter_rc2.set_filter(Some(&filter))
   });
@@ -521,7 +522,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   });
 
   settings_btn.connect_clicked(move |_| {
-    gtk::glib::MainContext::default().spawn_local(crate::preferences_dialog::dialog(
+    MainContext::default().spawn_local(crate::preferences_dialog::dialog(
       Rc::clone(&wnd_rc2),
       Rc::clone(&settings_rc),
     ));
