@@ -1,9 +1,8 @@
 -- Your SQL goes here
 CREATE TABLE IF NOT EXISTS tracks (
   filename VARCHAR NOT NULL PRIMARY KEY,
-  title VARCHAR,
   artist VARCHAR,
-  track VARCHAR,
+  title VARCHAR,
   album VARCHAR,
   genre VARCHAR,
   album_artist VARCHAR,
