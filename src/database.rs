@@ -1,11 +1,17 @@
 mod chunked_iterator;
+pub mod models;
+pub mod schema;
 
+use diesel::prelude::*;
+use diesel::sqlite::SqliteConnection;
 use directories::ProjectDirs;
+use dotenvy::dotenv;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
 use lofty::{Accessor, ItemKey, Probe};
 use rusqlite::{Connection, Result, Transaction};
 use std::collections::HashSet;
+use std::env;
 use std::rc::Rc;
 use walkdir::WalkDir;
 
@@ -29,6 +35,14 @@ pub struct Facet {
   pub all: bool,
 }
 
+pub fn establish_connection() -> PgConnection {
+  dotenv().ok();
+
+  let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+  SqliteConnection::establish(&database_url)
+    .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+}
+
 pub fn init_db(conn: &Connection) -> Result<usize> {
   conn.execute(
     "CREATE TABLE IF NOT EXISTS tracks (
@@ -44,13 +58,7 @@ pub fn init_db(conn: &Connection) -> Result<usize> {
     (),
   )?;
 
-  conn.execute(
-    "CREATE TABLE IF NOT EXISTS recently_played (
-        filename VARCHAR NOT NULL PRIMARY KEY,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-      )",
-    (),
-  )
+  conn.execute("", ())
 }
 
 pub fn connect_db(args: rusqlite::OpenFlags) -> Result<Connection, rusqlite::Error> {
