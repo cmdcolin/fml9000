@@ -16,3 +16,4 @@ serde = "1"
 toml = "0.5"
 walkdir = "2"
 regex = "1.7.0"
+diesel = { version = "2.0.0", features = ["sqlite"] }
