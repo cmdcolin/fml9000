@@ -3,9 +3,9 @@ mod load_css;
 mod preferences_dialog;
 mod settings;
 
+use fml9000::models::Track;
 use fml9000::{
-  add_track_to_recently_played, load_facet_store, load_playlist_store, load_tracks, run_scan,
-  Facet, Track,
+  add_track_to_recently_played, load_facet_store, load_playlist_store, load_tracks, run_scan, Facet,
 };
 use grid_cell::{Entry, GridCell};
 use gtk::gdk;
@@ -310,6 +310,9 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let rows_rc1 = rows_rc.clone();
   let rows_rc2 = rows_rc.clone();
 
+  use std::time::Instant;
+  let now = Instant::now();
+
   {
     let s = settings_rc.borrow();
     match &s.folder {
@@ -319,6 +322,9 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
       None => {}
     }
   }
+
+  let elapsed = now.elapsed();
+  println!("Elapsed: {:.2?}", elapsed);
 
   load_playlist_store(rows_rc.iter(), &playlist_store_rc);
   load_facet_store(&rows_rc1, &facet_store);
@@ -338,18 +344,16 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
         playlist_store_rc1.remove_all();
         let item = get_selection(&facet_sel_rc1, first_pos);
         let r: Ref<Facet> = item.borrow();
-        let con = rows_rc
-          .iter()
-          .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
+        let con = rows_rc.iter();
+        //.filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
 
         load_playlist_store(con, &playlist_store_rc);
 
         for pos in iter {
           let item = get_selection(&facet_sel_rc1, pos);
           let r: Ref<Facet> = item.borrow();
-          let con = rows_rc
-            .iter()
-            .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
+          let con = rows_rc.iter();
+          // .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
 
           load_playlist_store(con, &playlist_store_rc);
         }
@@ -393,7 +397,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
-      name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
+      name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string()),),
     });
   });
 

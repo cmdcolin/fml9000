@@ -15,5 +15,6 @@ serde = "1"
 toml = "0.5"
 walkdir = "2"
 regex = "1"
-diesel = { version = "2.0", features = ["sqlite"] }
+diesel = { version = "2.0", features = ["sqlite", "chrono", "uuid"] }
 dotenvy = "0.15"
+chrono = "0.4.23"

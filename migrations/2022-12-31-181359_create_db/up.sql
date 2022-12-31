@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS tracks (
   album VARCHAR,
   genre VARCHAR,
   album_artist VARCHAR,
+  track VARCHAR,
   added DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

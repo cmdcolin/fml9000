@@ -15,8 +15,12 @@ diesel::table! {
         album -> Nullable<Text>,
         genre -> Nullable<Text>,
         album_artist -> Nullable<Text>,
+        track -> Nullable<Text>,
         added -> Nullable<Timestamp>,
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(recently_played, tracks,);
+diesel::allow_tables_to_appear_in_same_query!(
+    recently_played,
+    tracks,
+);
