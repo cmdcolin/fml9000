@@ -1,10 +1,12 @@
-mod database;
 mod grid_cell;
 mod load_css;
 mod preferences_dialog;
 mod settings;
 
-use database::{Facet, Track};
+use fml9000::{
+  add_track_to_recently_played, load_facet_store, load_playlist_store, load_tracks, run_scan,
+  Facet, Track,
+};
 use grid_cell::{Entry, GridCell};
 use gtk::gdk;
 use gtk::gio::{self, ListStore, SimpleAction};
@@ -289,7 +291,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     sink.append(source);
     sink.play();
 
-    crate::database::add_track_to_recently_played(&f3);
+    add_track_to_recently_played(&f3);
 
     let mut p = PathBuf::from(f2);
     p.pop();
@@ -304,7 +306,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     )));
   });
 
-  let rows_rc = Rc::new(database::load_all().unwrap());
+  let rows_rc = Rc::new(load_tracks());
   let rows_rc1 = rows_rc.clone();
   let rows_rc2 = rows_rc.clone();
 
@@ -312,14 +314,14 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     let s = settings_rc.borrow();
     match &s.folder {
       Some(folder) => {
-        database::run_scan(&folder, &rows_rc2);
+        run_scan(&folder, &rows_rc2);
       }
       None => {}
     }
   }
 
-  database::load_playlist_store(rows_rc.iter(), &playlist_store_rc);
-  database::load_facet_store(&rows_rc1, &facet_store);
+  load_playlist_store(rows_rc.iter(), &playlist_store_rc);
+  load_facet_store(&rows_rc1, &facet_store);
 
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently added".to_string(),
@@ -340,7 +342,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
           .iter()
           .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
 
-        database::load_playlist_store(con, &playlist_store_rc);
+        load_playlist_store(con, &playlist_store_rc);
 
         for pos in iter {
           let item = get_selection(&facet_sel_rc1, pos);
@@ -349,7 +351,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
             .iter()
             .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
 
-          database::load_playlist_store(con, &playlist_store_rc);
+          load_playlist_store(con, &playlist_store_rc);
         }
       }
       None => { /* empty selection */ }

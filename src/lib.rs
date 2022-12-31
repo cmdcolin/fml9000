@@ -2,7 +2,7 @@ mod chunked_iterator;
 pub mod models;
 pub mod schema;
 
-use self::models::*;
+// use self::models::*;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use dotenvy::dotenv;
@@ -100,25 +100,27 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
   // }
 }
 
-// pub fn add_track_to_recently_played(path: &str) -> Result<(), rusqlite::Error> {
-//   let conn = connect_db();
-//   conn.execute("INSERT INTO recently_played (filename) VALUES (?)", (path,))?;
+pub fn add_track_to_recently_played(path: &str) -> () {
+  // let conn = connect_db();
+  // conn.execute("INSERT INTO recently_played (filename) VALUES (?)", (path,))?;
 
-//   Ok(())
-// }
+  // Ok(())
+}
 
-pub fn load_all() -> Vec<Track> {
-  use self::schema::tracks::dsl::*;
+pub fn load_tracks() -> Vec<Rc<Track>> {
+  // use self::schema::tracks::dsl::*;
 
-  let conn = &mut connect_db();
-  let results = tracks.load::<Track>(conn).expect("Error loading tracks");
+  // let conn = &mut connect_db();
+  // let results = tracks.load::<Track>(conn).expect("Error loading tracks");
 
-  println!("Displaying {} tracks", results.len());
-  for post in results {
-    println!("{}", post.filename);
-  }
+  // println!("Displaying {} tracks", results.len());
+  // for post in results {
+  //   println!("{}", post.filename);
+  // }
 
-  results
+  // results
+  //
+  Vec::new()
 }
 
 pub fn load_playlist_store<'a, I>(vals: I, store: &gio::ListStore)
