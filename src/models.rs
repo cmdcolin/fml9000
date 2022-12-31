@@ -1,5 +1,6 @@
-use crate::schema::tracks;
+use crate::schema::{recently_played, tracks};
 use diesel::prelude::*;
+use diesel::sql_types::Date;
 
 #[derive(Queryable)]
 pub struct Track {

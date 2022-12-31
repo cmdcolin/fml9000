@@ -5,7 +5,6 @@ pub mod schema;
 use self::models::*;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use diesel_demo::*;
 use dotenvy::dotenv;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
@@ -111,7 +110,7 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
 pub fn load_all() -> Vec<Track> {
   use self::schema::tracks::dsl::*;
 
-  let conn = &mut establish_connection();
+  let conn = &mut connect_db();
   let results = tracks.load::<Track>(conn).expect("Error loading tracks");
 
   println!("Displaying {} tracks", results.len());
