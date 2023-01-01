@@ -24,12 +24,12 @@ pub struct RecentlyPlayed {
 #[diesel(table_name = tracks)]
 pub struct NewTrack<'a> {
   pub filename: &'a str,
-  pub artist: &'a str,
-  pub title: &'a str,
-  pub album: &'a str,
-  pub genre: &'a str,
-  pub track: &'a str,
-  pub album_artist: &'a str,
+  pub artist: Option<&'a str>,
+  pub title: Option<&'a str>,
+  pub album: Option<&'a str>,
+  pub genre: Option<&'a str>,
+  pub track: Option<&'a str>,
+  pub album_artist: Option<&'a str>,
 }
 
 #[derive(Insertable)]

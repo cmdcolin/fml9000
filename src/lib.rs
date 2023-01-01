@@ -9,7 +9,7 @@ use diesel::sqlite::SqliteConnection;
 use dotenvy::dotenv;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
-use lofty::{ItemKey, Probe};
+use lofty::{Accessor, ItemKey, Probe, Tag};
 use std::collections::HashSet;
 use std::env;
 use std::rc::Rc;
@@ -32,64 +32,56 @@ pub fn connect_db() -> SqliteConnection {
     .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
 
-pub fn process_file(path: &str) -> Option<NewTrack> {
-  let tagged_file = Probe::open(path)
-    .expect("ERROR: Bad path provided!")
-    .read(true);
-  match tagged_file {
-    Ok(tagged_file) => {
-      let tag = match tagged_file.primary_tag() {
-        Some(primary_tag) => Some(primary_tag),
-        None => tagged_file.first_tag(),
-      };
-
-      match tag {
-        Some(tag) => Some(NewTrack {
-          filename: &path,
-          artist: tag.artist(),
-          album: tag.album(),
-          album_artist: tag.get_string(&ItemKey::AlbumArtist),
-          title: tag.title(),
-          track: tag.track(),
-          genre: tag.genre(),
-        }),
-        None => None,
-      }
-    }
-    Err(_) => None,
-  }
-}
 fn hashset(data: &Vec<Rc<Track>>) -> HashSet<&std::string::String> {
   HashSet::from_iter(data.iter().map(|elt| &elt.filename))
 }
 
-const MAX_VAL: i32 = 10000000;
-
 pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
   let hash = hashset(rows);
   let mut conn = connect_db();
-  let mut i = 0;
   let transaction_size = 20;
 
   for chunk in chunked_iterator::ChunkedIterator::new(
     WalkDir::new(folder).into_iter().filter_map(|e| e.ok()),
     transaction_size,
   ) {
-    let v = Vec::new();
     for file in chunk {
-      if file.file_type().is_file() && i < MAX_VAL {
+      if file.file_type().is_file() {
         let path = file.path();
-        let s = path.display().to_string();
-        if !hash.contains(&s) {
-          v.push(process_file(&s))
+        let path_str = path.display().to_string();
+        if !hash.contains(&path_str) {
+          let tagged_file = Probe::open(&path_str)
+            .expect("ERROR: Bad path provided!")
+            .read(true);
+          match tagged_file {
+            Ok(tagged_file) => {
+              let tag = match tagged_file.primary_tag() {
+                Some(primary_tag) => Some(primary_tag),
+                None => tagged_file.first_tag(),
+              };
+              match tag {
+                Some(t) => {
+                  println!("{:?}", t.get_string(&ItemKey::TrackNumber));
+                  diesel::insert_into(tracks::table)
+                    .values(NewTrack {
+                      filename: &path_str,
+                      artist: t.artist(),
+                      album: t.album(),
+                      album_artist: t.get_string(&ItemKey::AlbumArtist),
+                      title: t.title(),
+                      track: t.get_string(&ItemKey::TrackNumber),
+                      genre: t.artist(),
+                    })
+                    .execute(&mut conn);
+                }
+                None => (),
+              }
+            }
+            Err(_) => (),
+          };
         }
-        i = i + 1;
       }
     }
-
-    diesel::insert_into(tracks::table)
-      .values(&v)
-      .execute(&mut conn);
   }
 }
 
@@ -129,7 +121,7 @@ pub fn load_facet_store(rows: &[Rc<Track>], facet_store: &gio::ListStore) {
     facets.insert(Facet {
       album: row.album.clone(),
       album_artist: row.album_artist.clone(),
-      album_artist_or_artist: Some("".to_string()), //row.album_artist_or_artist.clone(),
+      album_artist_or_artist: row.album_artist.clone().or(row.artist.clone()),
       all: false,
     });
   }

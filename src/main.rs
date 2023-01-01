@@ -397,7 +397,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     let (cell, obj) = get_cell(item);
     let r: Ref<Rc<Track>> = obj.borrow();
     cell.set_entry(&Entry {
-      name: format!("{}", r.title.as_ref().unwrap_or(&"".to_string()),),
+      name: format!("{}", r.track.as_ref().unwrap_or(&"".to_string()),),
     });
   });
 
