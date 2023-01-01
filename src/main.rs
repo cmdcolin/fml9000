@@ -34,6 +34,10 @@ fn str_or_unknown(str: &Option<String>) -> String {
   str.as_ref().unwrap_or(&"(Unknown)".to_string()).to_string()
 }
 
+fn get_album_artist_or_artist(track: &Track) -> Option<String> {
+  return track.album_artist.clone().or(track.artist.clone());
+}
+
 fn setup_col(item: &Object) {
   item
     .downcast_ref::<ListItem>()
@@ -344,16 +348,18 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
         playlist_store_rc1.remove_all();
         let item = get_selection(&facet_sel_rc1, first_pos);
         let r: Ref<Facet> = item.borrow();
-        let con = rows_rc.iter();
-        //.filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
+        let con = rows_rc.iter().filter(|x| {
+          get_album_artist_or_artist(x) == r.album_artist_or_artist && x.album == r.album
+        });
 
         load_playlist_store(con, &playlist_store_rc);
 
         for pos in iter {
           let item = get_selection(&facet_sel_rc1, pos);
           let r: Ref<Facet> = item.borrow();
-          let con = rows_rc.iter();
-          // .filter(|x| x.album_artist_or_artist == r.album_artist_or_artist && x.album == r.album);
+          let con = rows_rc.iter().filter(|x| {
+            get_album_artist_or_artist(x) == r.album_artist_or_artist && x.album == r.album
+          });
 
           load_playlist_store(con, &playlist_store_rc);
         }

@@ -17,16 +17,8 @@ use walkdir::WalkDir;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
-fn run_migrations(
-  connection: &mut impl MigrationHarness<DB>,
-) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-  // This will run the necessary migrations.
-  //
-  // See the documentation for `MigrationHarness` for
-  // all available methods.
-  connection.run_pending_migrations(MIGRATIONS)?;
-
-  Ok(())
+fn run_migration(conn: &mut SqliteConnection) {
+  conn.run_pending_migrations(MIGRATIONS).unwrap();
 }
 
 #[derive(Hash, Eq, Ord, PartialEq, PartialOrd, Debug)]
@@ -41,7 +33,6 @@ pub fn connect_db() -> SqliteConnection {
   let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
   let path = proj_dirs.config_dir().join("library.db");
   let database_url = format!("sqlite://{}", path.to_str().unwrap());
-  println!("{}", database_url);
   SqliteConnection::establish(&database_url)
     .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
@@ -75,7 +66,6 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
               };
               match tag {
                 Some(t) => {
-                  println!("{:?}", t.get_string(&ItemKey::TrackNumber));
                   diesel::insert_into(tracks::table)
                     .values(NewTrack {
                       filename: &path_str,
@@ -111,11 +101,6 @@ pub fn load_tracks() -> Vec<Rc<Track>> {
 
   let conn = &mut connect_db();
   let results = tracks.load::<Track>(conn).expect("Error loading tracks");
-
-  // println!("Displaying {} tracks", results.len());
-  // for track in &results {
-  //   println!("{}", track.filename);
-  // }
 
   results.into_iter().map(|r| Rc::new(r)).collect()
 }
