@@ -103,6 +103,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let sink_refcell_rc1 = sink_refcell_rc.clone();
   let sink_refcell_rc2 = sink_refcell_rc.clone();
   let sink_refcell_rc3 = sink_refcell_rc.clone();
+  let sink_refcell_rc4 = sink_refcell_rc.clone();
   let settings_rc = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   load_css::load_css();
@@ -539,6 +540,11 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   play_btn.connect_clicked(move |_| {
     let sink = sink_refcell_rc3.borrow();
     sink.play();
+  });
+
+  stop_btn.connect_clicked(move |_| {
+    let sink = sink_refcell_rc4.borrow();
+    sink.stop()
   });
 
   settings_btn.connect_clicked(move |_| {
