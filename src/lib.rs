@@ -6,15 +6,28 @@ use self::models::*;
 use self::schema::tracks;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use dotenvy::dotenv;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use directories::ProjectDirs;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
-use lofty::{Accessor, ItemKey, Probe, Tag};
+use lofty::{Accessor, ItemKey, Probe};
 use std::collections::HashSet;
-use std::env;
 use std::rc::Rc;
 use walkdir::WalkDir;
-// use directories::ProjectDirs;
+
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
+
+fn run_migrations(
+  connection: &mut impl MigrationHarness<DB>,
+) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+  // This will run the necessary migrations.
+  //
+  // See the documentation for `MigrationHarness` for
+  // all available methods.
+  connection.run_pending_migrations(MIGRATIONS)?;
+
+  Ok(())
+}
 
 #[derive(Hash, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct Facet {
@@ -25,9 +38,10 @@ pub struct Facet {
 }
 
 pub fn connect_db() -> SqliteConnection {
-  dotenv().ok();
-
-  let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
+  let path = proj_dirs.config_dir().join("library.db");
+  let database_url = format!("sqlite://{}", path.to_str().unwrap());
+  println!("{}", database_url);
   SqliteConnection::establish(&database_url)
     .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
