@@ -1,3 +1,4 @@
+mod facet_box;
 mod grid_cell;
 mod gtk_helpers;
 mod header_bar;
@@ -5,9 +6,10 @@ mod load_css;
 mod preferences_dialog;
 mod settings;
 
+use facet_box::create_facet_box;
 use fml9000::models::Track;
 use fml9000::{
-  add_track_to_recently_played, load_facet_store, load_playlist_store, load_tracks, run_scan, Facet,
+  add_track_to_recently_played, load_facet_store, load_playlist_store, load_tracks, run_scan,
 };
 use grid_cell::Entry;
 use gtk::gdk;
@@ -15,17 +17,14 @@ use gtk::gio::{self, ListStore, SimpleAction};
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  Application, ApplicationWindow, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter,
-  FilterListModel, GestureClick, Image, KeyvalTrigger, MultiSelection, Notebook, Orientation,
-  Paned, PopoverMenu, ScrolledWindow, SearchEntry, Shortcut, ShortcutAction, SignalListItemFactory,
-  SingleSelection, SortListModel,
+  Application, ApplicationWindow, ColumnView, ColumnViewColumn, CustomFilter, GestureClick, Image,
+  KeyvalTrigger, MultiSelection, Notebook, Orientation, Paned, PopoverMenu, ScrolledWindow,
+  Shortcut, ShortcutAction, SignalListItemFactory, SingleSelection,
 };
 use gtk_helpers::{
-  create_widget, get_album_artist_or_artist, get_cell, get_playlist_activate_selection,
-  get_selection, setup_col, str_or_unknown,
+  create_widget, get_cell, get_playlist_activate_selection, setup_col, str_or_unknown,
 };
 use header_bar::create_header_bar;
-use regex::Regex;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::{Ref, RefCell};
 use std::fs::File;
@@ -68,19 +67,8 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   load_css::load_css();
 
-  let case_insensitive_sorter = CustomSorter::new(|obj1, obj2| {
-    let k1: Ref<Facet> = obj1.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
-    let k2: Ref<Facet> = obj2.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
-    let emp = "".to_string();
-    let t1 = k1.album_artist_or_artist.as_ref().unwrap_or(&emp);
-    let t2 = k2.album_artist_or_artist.as_ref().unwrap_or(&emp);
-    t1.to_lowercase().cmp(&t2.to_lowercase()).into()
-  });
-
   let filter = CustomFilter::new(|_| true);
-  let facet_store = ListStore::new(BoxedAnyObject::static_type());
-  let facet_filter = FilterListModel::new(Some(&facet_store), Some(&filter));
-  let facet_sort = SortListModel::new(Some(&facet_filter), Some(&case_insensitive_sorter));
+
   let playlist_store = ListStore::new(BoxedAnyObject::static_type());
   let playlist_mgr_store = ListStore::new(BoxedAnyObject::static_type());
 
@@ -98,9 +86,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   playlist_columnview.add_controller(&source);
 
-  let facet_sel = MultiSelection::new(Some(&facet_sort));
-  let facet_columnview = ColumnView::builder().model(&facet_sel).build();
-
   let playlist_mgr_sel = SingleSelection::builder()
     .model(&playlist_mgr_store)
     .build();
@@ -113,19 +98,13 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let playlist_sel_rc = Rc::new(playlist_sel);
   let playlist_sel_rc1 = playlist_sel_rc.clone();
 
-  let facet_sel_rc = Rc::new(facet_sel);
-  let facet_sel_rc1 = facet_sel_rc.clone();
-
   let playlist_store_rc = Rc::new(playlist_store);
-  let playlist_store_rc1 = playlist_store_rc.clone();
-
   let playlist_mgr_columnview = ColumnView::builder().model(&playlist_mgr_sel).build();
 
   let artistalbum = SignalListItemFactory::new();
   let title = SignalListItemFactory::new();
   let filename = SignalListItemFactory::new();
   let track = SignalListItemFactory::new();
-  let facet = SignalListItemFactory::new();
   let playlist_mgr = SignalListItemFactory::new();
 
   let pauseplay_action = SimpleAction::new("pauseplay", None);
@@ -184,13 +163,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .factory(&filename)
     .build();
 
-  let facet_col = ColumnViewColumn::builder()
-    .title("Album Artist / Album")
-    .factory(&facet)
-    .expand(true)
-    .sorter(&case_insensitive_sorter)
-    .build();
-
   let playlist_mgr_col = ColumnViewColumn::builder()
     .title("Playlists")
     .factory(&playlist_mgr)
@@ -201,7 +173,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   playlist_columnview.append_column(&playlist_col2);
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
-  facet_columnview.append_column(&facet_col);
   playlist_mgr_columnview.append_column(&playlist_mgr_col);
 
   let action1 = SimpleAction::new("add_to_playlist", None);
@@ -291,6 +262,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let elapsed = now.elapsed();
   println!("Elapsed: {:.2?}", elapsed);
 
+  let facet_store = ListStore::new(BoxedAnyObject::static_type());
   load_playlist_store(rows_rc.iter(), &playlist_store_rc);
   load_facet_store(&rows_rc1, &facet_store);
 
@@ -300,51 +272,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   playlist_mgr_store.append(&BoxedAnyObject::new(Playlist {
     name: "Recently played".to_string(),
   }));
-
-  facet_sel_rc.connect_selection_changed(move |_, _, _| {
-    let selection = facet_sel_rc1.selection();
-    match gtk::BitsetIter::init_first(&selection) {
-      Some(result) => {
-        let (iter, first_pos) = result;
-        playlist_store_rc1.remove_all();
-        let item = get_selection(&facet_sel_rc1, first_pos);
-        let r: Ref<Facet> = item.borrow();
-        let con = rows_rc.iter().filter(|x| {
-          get_album_artist_or_artist(x) == r.album_artist_or_artist && x.album == r.album
-        });
-
-        load_playlist_store(con, &playlist_store_rc);
-
-        for pos in iter {
-          let item = get_selection(&facet_sel_rc1, pos);
-          let r: Ref<Facet> = item.borrow();
-          let con = rows_rc.iter().filter(|x| {
-            get_album_artist_or_artist(x) == r.album_artist_or_artist && x.album == r.album
-          });
-
-          load_playlist_store(con, &playlist_store_rc);
-        }
-      }
-      None => { /* empty selection */ }
-    }
-  });
-
-  facet.connect_setup(|_factory, item| setup_col(item));
-  facet.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_cell(item);
-    let r: Ref<Facet> = obj.borrow();
-    cell.set_entry(&Entry {
-      name: if r.all {
-        "(All)".to_string()
-      } else {
-        format!(
-          "{} // {}",
-          str_or_unknown(&r.album_artist_or_artist),
-          str_or_unknown(&r.album),
-        )
-      },
-    });
-  });
 
   artistalbum.connect_setup(move |_factory, item| setup_col(item));
   artistalbum.connect_bind(move |_factory, item| {
@@ -395,36 +322,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     });
   });
 
-  let facet_wnd = ScrolledWindow::builder()
-    .child(&facet_columnview)
-    .vexpand(true)
-    .build();
-
-  let facet_box = gtk::Box::new(Orientation::Vertical, 0);
-  let search_bar = SearchEntry::builder().build();
-
-  search_bar.connect_search_changed(move |s| {
-    let text = s.text();
-    let re = Regex::new(&format!("(?i){}", regex::escape(text.as_str()))).unwrap();
-    let filter = CustomFilter::new(move |obj| {
-      let r = obj.downcast_ref::<BoxedAnyObject>().unwrap();
-      let k: Ref<Facet> = r.borrow();
-      let k0 = k.all;
-      let k1 = match &k.album {
-        Some(s) => re.is_match(&s),
-        None => false,
-      };
-      let k2 = match &k.album_artist_or_artist {
-        Some(s) => re.is_match(&s),
-        None => false,
-      };
-      k0 || k1 || k2
-    });
-    facet_filter.set_filter(Some(&filter))
-  });
-  facet_box.append(&search_bar);
-  facet_box.append(&facet_wnd);
-
   let playlist_wnd = ScrolledWindow::builder()
     .child(&playlist_columnview)
     .build();
@@ -432,6 +329,8 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let playlist_mgr_wnd = ScrolledWindow::builder()
     .child(&playlist_mgr_columnview)
     .build();
+
+  let facet_box = create_facet_box(&playlist_store_rc, &facet_store, &filter, &rows_rc);
 
   let ltopbottom = Paned::builder()
     .vexpand(true)
