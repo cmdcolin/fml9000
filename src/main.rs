@@ -1,4 +1,6 @@
 mod grid_cell;
+mod gtk_helpers;
+mod header_bar;
 mod load_css;
 mod preferences_dialog;
 mod settings;
@@ -7,17 +9,22 @@ use fml9000::models::Track;
 use fml9000::{
   add_track_to_recently_played, load_facet_store, load_playlist_store, load_tracks, run_scan, Facet,
 };
-use grid_cell::{Entry, GridCell};
+use grid_cell::Entry;
 use gtk::gdk;
 use gtk::gio::{self, ListStore, SimpleAction};
-use gtk::glib::{BoxedAnyObject, MainContext, Object};
+use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, CustomFilter,
-  CustomSorter, FilterListModel, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection,
-  Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut,
-  ShortcutAction, SignalListItemFactory, SingleSelection, SortListModel, VolumeButton,
+  Application, ApplicationWindow, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter,
+  FilterListModel, GestureClick, Image, KeyvalTrigger, MultiSelection, Notebook, Orientation,
+  Paned, PopoverMenu, ScrolledWindow, SearchEntry, Shortcut, ShortcutAction, SignalListItemFactory,
+  SingleSelection, SortListModel,
 };
+use gtk_helpers::{
+  create_widget, get_album_artist_or_artist, get_cell, get_playlist_activate_selection,
+  get_selection, setup_col, str_or_unknown,
+};
+use header_bar::create_header_bar;
 use regex::Regex;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::cell::{Ref, RefCell};
@@ -28,50 +35,6 @@ use std::rc::Rc;
 
 struct Playlist {
   name: String,
-}
-
-fn str_or_unknown(str: &Option<String>) -> String {
-  str.as_ref().unwrap_or(&"(Unknown)".to_string()).to_string()
-}
-
-fn get_album_artist_or_artist(track: &Track) -> Option<String> {
-  return track.album_artist.clone().or(track.artist.clone());
-}
-
-fn setup_col(item: &Object) {
-  item
-    .downcast_ref::<ListItem>()
-    .unwrap()
-    .set_child(Some(&GridCell::new()));
-}
-
-fn get_cell(item: &Object) -> (GridCell, BoxedAnyObject) {
-  let item = item.downcast_ref::<ListItem>().unwrap();
-  let child = item.child().unwrap().downcast::<GridCell>().unwrap();
-  let obj = item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-  (child, obj)
-}
-
-fn get_selection(sel: &MultiSelection, pos: u32) -> BoxedAnyObject {
-  sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
-}
-
-fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyObject {
-  sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
-}
-
-fn load_img(a: &[u8]) -> Image {
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(a).unwrap();
-  loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let img = Image::new();
-  img.set_from_pixbuf(Some(&pixbuf));
-  img
-}
-
-fn create_button(img: &Image) -> Button {
-  Button::builder().child(img).build()
 }
 
 const APP_ID: &str = "com.github.fml9000";
@@ -97,12 +60,10 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   let wnd_rc = Rc::new(wnd);
   let wnd_rc1 = wnd_rc.clone();
-  let wnd_rc2 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
-  let sink_refcell_rc2 = sink_refcell_rc.clone();
-  let sink_refcell_rc3 = sink_refcell_rc.clone();
+
   let settings_rc = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   load_css::load_css();
@@ -493,66 +454,20 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .end_child(&rtopbottom)
     .build();
 
-  let prev_btn = create_button(&load_img(include_bytes!("img/prev.svg")));
-  let stop_btn = create_button(&load_img(include_bytes!("img/stop.svg")));
-  let next_btn = create_button(&load_img(include_bytes!("img/next.svg")));
-  let pause_btn = create_button(&load_img(include_bytes!("img/pause.svg")));
-  let play_btn = create_button(&load_img(include_bytes!("img/play.svg")));
-  let settings_btn = create_button(&load_img(include_bytes!("img/settings.svg")));
-
-  let button_box = gtk::Box::new(Orientation::Horizontal, 0);
-  let seek_slider = Scale::builder()
-    .hexpand(true)
-    .orientation(Orientation::Horizontal)
-    .adjustment(&Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0))
-    .build();
-
-  let volume_button = VolumeButton::builder()
-    .value({
-      let s = settings_rc.borrow();
-      s.volume
-    })
-    .build();
-  let settings_rc1 = settings_rc.clone();
-  volume_button.connect_value_changed(move |_, volume| {
-    let sink = sink_refcell_rc1.borrow();
-    let mut s = settings_rc1.borrow_mut();
-    s.volume = volume;
-    crate::settings::write_settings(&s).expect("Failed to write");
-    sink.set_volume(volume as f32);
-  });
-
-  button_box.append(&settings_btn);
-  button_box.append(&seek_slider);
-  button_box.append(&play_btn);
-  button_box.append(&pause_btn);
-  button_box.append(&prev_btn);
-  button_box.append(&next_btn);
-  button_box.append(&stop_btn);
-  button_box.append(&volume_button);
-
-  pause_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc2.borrow();
-    sink.pause();
-  });
-
-  play_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc3.borrow();
-    sink.play();
-  });
-
-  settings_btn.connect_clicked(move |_| {
-    MainContext::default().spawn_local(crate::preferences_dialog::dialog(
-      Rc::clone(&wnd_rc2),
-      Rc::clone(&settings_rc),
-    ));
-  });
-
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
+  let rss_ui = gtk::Box::new(Orientation::Vertical, 0);
+
+  let button_box = create_header_bar(settings_rc, sink_refcell_rc1, &wnd_rc);
+
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
   main_ui.add_controller(&gesture);
   popover_menu_rc.set_parent(&main_ui);
-  wnd_rc.set_child(Some(&main_ui));
+  let notebook = Notebook::new();
+  let lab1 = create_widget("Library");
+  let lab2 = create_widget("RSS");
+  notebook.append_page(&main_ui, Some(&lab1));
+  notebook.append_page(&rss_ui, Some(&lab2));
+  wnd_rc.set_child(Some(&notebook));
   wnd_rc.show();
 }

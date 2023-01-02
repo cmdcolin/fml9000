@@ -20,6 +20,5 @@ cargo run
 
 Usage with Linuxbrew may not work, I had to completely uninstall linuxbrew to
 make the development work on my computer. A minimal homebrew/linuxbrew install
-may work but certain pacakages may confuse pkg-config too much. See
+may work but certain packages may confuse pkg-config too much. See
 https://github.com/tauri-apps/tauri/issues/3856
-
