@@ -15,11 +15,12 @@ use gtk::prelude::*;
 use gtk::{
   Adjustment, Application, ApplicationWindow, Button, ColumnView, ColumnViewColumn, CustomFilter,
   CustomSorter, FilterListModel, GestureClick, Image, KeyvalTrigger, ListItem, MultiSelection,
-  Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel, Shortcut,
-  ShortcutAction, SignalListItemFactory, SingleSelection, SortListModel, VolumeButton,
+  Notebook, Orientation, Paned, PopoverMenu, Scale, ScrolledWindow, SearchEntry, SelectionModel,
+  Shortcut, ShortcutAction, SignalListItemFactory, SingleSelection, SortListModel, VolumeButton,
 };
 use regex::Regex;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use settings::FmlSettings;
 use std::cell::{Ref, RefCell};
 use std::fs::File;
 use std::io::BufReader;
@@ -74,7 +75,82 @@ fn create_button(img: &Image) -> Button {
   Button::builder().child(img).build()
 }
 
+fn create_widget<'r>(label: &str) -> gtk::Widget {
+  gtk::Label::new(Some(label)).into()
+}
+
 const APP_ID: &str = "com.github.fml9000";
+
+fn construct_header_main(
+  settings: Rc<RefCell<FmlSettings>>,
+  sink: Rc<RefCell<Sink>>,
+  wnd: &Rc<gtk::ApplicationWindow>,
+) -> gtk::Box {
+  let sink1 = sink.clone();
+  let sink2 = sink.clone();
+  let sink3 = sink.clone();
+  let wnd1 = wnd.clone();
+  let prev_btn = create_button(&load_img(include_bytes!("img/prev.svg")));
+  let stop_btn = create_button(&load_img(include_bytes!("img/stop.svg")));
+  let next_btn = create_button(&load_img(include_bytes!("img/next.svg")));
+  let pause_btn = create_button(&load_img(include_bytes!("img/pause.svg")));
+  let play_btn = create_button(&load_img(include_bytes!("img/play.svg")));
+  let settings_btn = create_button(&load_img(include_bytes!("img/settings.svg")));
+
+  let button_box = gtk::Box::new(Orientation::Horizontal, 0);
+  let seek_slider = Scale::builder()
+    .hexpand(true)
+    .orientation(Orientation::Horizontal)
+    .adjustment(&Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0))
+    .build();
+
+  let volume_button = VolumeButton::builder()
+    .value({
+      let s = settings.borrow();
+      s.volume
+    })
+    .build();
+  let settings1 = settings.clone();
+  volume_button.connect_value_changed(move |_, volume| {
+    let sink = sink.borrow();
+    let mut s = settings1.borrow_mut();
+    s.volume = volume;
+    crate::settings::write_settings(&s).expect("Failed to write");
+    sink.set_volume(volume as f32);
+  });
+
+  button_box.append(&settings_btn);
+  button_box.append(&seek_slider);
+  button_box.append(&play_btn);
+  button_box.append(&pause_btn);
+  button_box.append(&prev_btn);
+  button_box.append(&next_btn);
+  button_box.append(&stop_btn);
+  button_box.append(&volume_button);
+
+  pause_btn.connect_clicked(move |_| {
+    let sink = sink1.borrow();
+    sink.pause();
+  });
+
+  play_btn.connect_clicked(move |_| {
+    let sink = sink2.borrow();
+    sink.play();
+  });
+
+  stop_btn.connect_clicked(move |_| {
+    let sink = sink3.borrow();
+    sink.stop()
+  });
+
+  settings_btn.connect_clicked(move |_| {
+    MainContext::default().spawn_local(crate::preferences_dialog::dialog(
+      Rc::clone(&wnd1),
+      Rc::clone(&settings),
+    ));
+  });
+  return button_box;
+}
 
 fn main() {
   let app = Application::builder().application_id(APP_ID).build();
@@ -97,13 +173,10 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   let wnd_rc = Rc::new(wnd);
   let wnd_rc1 = wnd_rc.clone();
-  let wnd_rc2 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
-  let sink_refcell_rc2 = sink_refcell_rc.clone();
-  let sink_refcell_rc3 = sink_refcell_rc.clone();
-  let sink_refcell_rc4 = sink_refcell_rc.clone();
+
   let settings_rc = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   load_css::load_css();
@@ -494,71 +567,20 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .end_child(&rtopbottom)
     .build();
 
-  let prev_btn = create_button(&load_img(include_bytes!("img/prev.svg")));
-  let stop_btn = create_button(&load_img(include_bytes!("img/stop.svg")));
-  let next_btn = create_button(&load_img(include_bytes!("img/next.svg")));
-  let pause_btn = create_button(&load_img(include_bytes!("img/pause.svg")));
-  let play_btn = create_button(&load_img(include_bytes!("img/play.svg")));
-  let settings_btn = create_button(&load_img(include_bytes!("img/settings.svg")));
-
-  let button_box = gtk::Box::new(Orientation::Horizontal, 0);
-  let seek_slider = Scale::builder()
-    .hexpand(true)
-    .orientation(Orientation::Horizontal)
-    .adjustment(&Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0))
-    .build();
-
-  let volume_button = VolumeButton::builder()
-    .value({
-      let s = settings_rc.borrow();
-      s.volume
-    })
-    .build();
-  let settings_rc1 = settings_rc.clone();
-  volume_button.connect_value_changed(move |_, volume| {
-    let sink = sink_refcell_rc1.borrow();
-    let mut s = settings_rc1.borrow_mut();
-    s.volume = volume;
-    crate::settings::write_settings(&s).expect("Failed to write");
-    sink.set_volume(volume as f32);
-  });
-
-  button_box.append(&settings_btn);
-  button_box.append(&seek_slider);
-  button_box.append(&play_btn);
-  button_box.append(&pause_btn);
-  button_box.append(&prev_btn);
-  button_box.append(&next_btn);
-  button_box.append(&stop_btn);
-  button_box.append(&volume_button);
-
-  pause_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc2.borrow();
-    sink.pause();
-  });
-
-  play_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc3.borrow();
-    sink.play();
-  });
-
-  stop_btn.connect_clicked(move |_| {
-    let sink = sink_refcell_rc4.borrow();
-    sink.stop()
-  });
-
-  settings_btn.connect_clicked(move |_| {
-    MainContext::default().spawn_local(crate::preferences_dialog::dialog(
-      Rc::clone(&wnd_rc2),
-      Rc::clone(&settings_rc),
-    ));
-  });
-
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
+  let rss_ui = gtk::Box::new(Orientation::Vertical, 0);
+
+  let button_box = construct_header_main(settings_rc, sink_refcell_rc1, &wnd_rc);
+
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
   main_ui.add_controller(&gesture);
   popover_menu_rc.set_parent(&main_ui);
-  wnd_rc.set_child(Some(&main_ui));
+  let notebook = Notebook::new();
+  let lab1 = create_widget("Library");
+  let lab2 = create_widget("RSS");
+  notebook.append_page(&main_ui, Some(&lab1));
+  notebook.append_page(&rss_ui, Some(&lab2));
+  wnd_rc.set_child(Some(&notebook));
   wnd_rc.show();
 }
