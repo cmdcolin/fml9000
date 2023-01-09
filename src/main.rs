@@ -149,28 +149,3 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   wnd_rc.set_child(Some(&notebook));
   wnd_rc.show();
 }
-
-// non working pause/play with spacebar
-//   let pauseplay_action = SimpleAction::new("pauseplay", None);
-//   pauseplay_action.connect_activate(|a, b| {
-//     println!("pauseplay {:?} {:?}", a, b);
-//   });
-//   wnd_rc.add_action(&pauseplay_action);
-
-//   let pauseplay_shortcut = ShortcutAction::parse_string("action(win.pauseplay)").unwrap();
-//   pauseplay_action.connect_activate(|_, _| {});
-//   let trigger = KeyvalTrigger::new(gdk::Key::space, gdk::ModifierType::empty());
-//   let shortcut = Shortcut::builder()
-//     .trigger(&trigger)
-//     .action(&pauseplay_shortcut)
-//     .build();
-//   let shortcut_controller = gtk::ShortcutController::new();
-//   shortcut_controller.add_shortcut(&shortcut);
-//   shortcut_controller.connect_scope_notify(|_| {
-//     println!("here");
-//   });
-
-//   shortcut_controller.connect_mnemonic_modifiers_notify(|_| {
-//     println!("here2");
-//   });
-//   wnd_rc.add_controller(&shortcut_controller);
