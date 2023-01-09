@@ -89,7 +89,7 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
   }
 }
 
-pub fn add_track_to_recently_played(path: &str) -> () {
+pub fn add_track_to_recently_played(_path: &str) -> () {
   // let conn = connect_db();
   // conn.execute("INSERT INTO recently_played (filename) VALUES (?)", (path,))?;
 

@@ -9,22 +9,21 @@ mod preferences_dialog;
 mod settings;
 
 use facet_box::create_facet_box;
-use fml9000::models::Track;
+
 use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
-use grid_cell::Entry;
+
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
   Application, ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned,
-  SignalListItemFactory,
 };
-use gtk_helpers::{create_widget, get_cell, setup_col};
+use gtk_helpers::{create_widget};
 use header_bar::create_header_bar;
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
 use rodio::{OutputStream, OutputStreamHandle, Sink};
-use std::cell::{Ref, RefCell};
+use std::cell::{RefCell};
 use std::rc::Rc;
 
 struct Playlist {
@@ -53,7 +52,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .build();
 
   let wnd_rc = Rc::new(wnd);
-  let wnd_rc1 = wnd_rc.clone();
+  let _wnd_rc1 = wnd_rc.clone();
   let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
@@ -79,7 +78,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let album_art = Image::builder().vexpand(true).build();
 
   let album_art_rc = Rc::new(album_art);
-  let album_art_rc1 = album_art_rc.clone();
+  let _album_art_rc1 = album_art_rc.clone();
 
   let playlist_store_rc = Rc::new(playlist_store);
   let playlist_store_rc2 = playlist_store_rc.clone();

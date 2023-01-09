@@ -18,7 +18,7 @@ pub async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>, settings: Rc<RefCell<FmlSet
 
   let content_area = preferences_dialog.content_area();
   let open_button = Button::builder().label("Open folder...").build();
-  let s = { settings.borrow().folder.clone() };
+  let s = settings.borrow().folder.clone();
   let textbox = Entry::builder()
     .text(s.as_ref().unwrap_or(&"Empty".to_string()))
     .hexpand(true)
