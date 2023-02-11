@@ -16,9 +16,9 @@ use std::cell::Ref;
 use std::rc::Rc;
 
 pub fn create_facet_box(
-  playlist_store: &Rc<ListStore>,
-  facet_store: &ListStore,
-  filter: &CustomFilter,
+  playlist_store: ListStore,
+  facet_store: ListStore,
+  filter: CustomFilter,
   tracks: &Rc<Vec<Rc<Track>>>,
 ) -> gtk::Box {
   let case_insensitive_sorter = CustomSorter::new(|obj1, obj2| {
@@ -30,9 +30,12 @@ pub fn create_facet_box(
     t1.to_lowercase().cmp(&t2.to_lowercase()).into()
   });
   let facet_filter = FilterListModel::new(Some(facet_store), Some(filter));
-  let facet_sort = SortListModel::new(Some(&facet_filter), Some(&case_insensitive_sorter));
+  let facet_sort = SortListModel::new(
+    Some(facet_filter.clone()),
+    Some(case_insensitive_sorter.clone()),
+  );
 
-  let facet_sel = MultiSelection::new(Some(&facet_sort));
+  let facet_sel = MultiSelection::new(Some(facet_sort));
   let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
   let facet_sel_rc = Rc::new(facet_sel);

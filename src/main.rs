@@ -15,20 +15,14 @@ use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
-use gtk::{
-  Application, ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned,
-};
-use gtk_helpers::{create_widget};
+use gtk::{Application, ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned};
+use gtk_helpers::create_widget;
 use header_bar::create_header_bar;
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
 use rodio::{OutputStream, OutputStreamHandle, Sink};
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
-
-struct Playlist {
-  name: String,
-}
 
 const APP_ID: &str = "com.github.fml9000";
 
@@ -80,9 +74,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let album_art_rc = Rc::new(album_art);
   let _album_art_rc1 = album_art_rc.clone();
 
-  let playlist_store_rc = Rc::new(playlist_store);
-  let playlist_store_rc2 = playlist_store_rc.clone();
-
   let rows_rc = Rc::new(load_tracks());
   let rows_rc1 = rows_rc.clone();
   let rows_rc2 = rows_rc.clone();
@@ -104,13 +95,16 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   println!("Elapsed: {:.2?}", elapsed);
 
   let facet_store = ListStore::new(BoxedAnyObject::static_type());
-  load_playlist_store(rows_rc.iter(), &playlist_store_rc);
+  load_playlist_store(rows_rc.iter(), &playlist_store);
   load_facet_store(&rows_rc1, &facet_store);
 
-  let playlist_wnd =
-    create_playlist_view(&playlist_store_rc2, &sink_refcell_rc, &stream_handle_clone);
+  let playlist_wnd = create_playlist_view(
+    playlist_store.clone(),
+    &sink_refcell_rc,
+    &stream_handle_clone,
+  );
   let playlist_mgr_wnd = create_playlist_manager(&playlist_mgr_store);
-  let facet_box = create_facet_box(&playlist_store_rc, &facet_store, &filter, &rows_rc);
+  let facet_box = create_facet_box(playlist_store, facet_store, filter, &rows_rc);
 
   let ltopbottom = Paned::builder()
     .vexpand(true)

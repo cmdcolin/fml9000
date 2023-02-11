@@ -23,7 +23,7 @@ fn create_column(cb: impl Fn(Ref<Rc<Track>>) -> String + 'static) -> SignalListI
 }
 
 pub fn create_playlist_view(
-  playlist_store: &ListStore,
+  playlist_store: ListStore,
   sink_rc: &Rc<RefCell<Sink>>,
   stream_handle: &Rc<OutputStreamHandle>,
 ) -> ScrolledWindow {
