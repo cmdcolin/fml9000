@@ -15,15 +15,13 @@ use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
-use gtk::{
-  Application, ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned,
-};
-use gtk_helpers::{create_widget};
+use gtk::{Application, ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned};
+use gtk_helpers::create_widget;
 use header_bar::create_header_bar;
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
 use rodio::{OutputStream, OutputStreamHandle, Sink};
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 struct Playlist {

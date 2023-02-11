@@ -9,7 +9,7 @@ diesel = { version = "2.0", features = ["sqlite", "chrono", "uuid"] }
 diesel_migrations = { version = "2.0", features = ["sqlite"] }
 directories = "4.0"
 chrono = "0.4.23"
-gtk = { version = "0.5", package = "gtk4", features = ["v4_8"]  }
+gtk = { version = "0.6", package = "gtk4", features = ["v4_8"]  }
 lofty = "0.8"
 notify = "4"
 regex = "1"
