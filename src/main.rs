@@ -47,7 +47,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   let wnd_rc = Rc::new(wnd);
   let _wnd_rc1 = wnd_rc.clone();
-  let stream_handle_clone = stream_handle.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
 
@@ -98,11 +97,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   load_playlist_store(rows_rc.iter(), &playlist_store);
   load_facet_store(&rows_rc1, &facet_store);
 
-  let playlist_wnd = create_playlist_view(
-    playlist_store.clone(),
-    &sink_refcell_rc,
-    &stream_handle_clone,
-  );
+  let playlist_wnd = create_playlist_view(playlist_store.clone(), &sink_refcell_rc);
   let playlist_mgr_wnd = create_playlist_manager(&playlist_mgr_store);
   let facet_box = create_facet_box(playlist_store, facet_store, filter, &rows_rc);
 

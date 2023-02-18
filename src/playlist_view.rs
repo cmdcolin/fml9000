@@ -4,7 +4,7 @@ use fml9000::add_track_to_recently_played;
 use fml9000::models::Track;
 use gtk::gio::ListStore;
 use gtk::{ColumnView, ColumnViewColumn, MultiSelection, ScrolledWindow, SignalListItemFactory};
-use rodio::{Decoder, OutputStreamHandle, Sink};
+use rodio::{Decoder, Sink};
 use std::cell::{Ref, RefCell};
 use std::fs::File;
 use std::io::BufReader;
@@ -25,7 +25,6 @@ fn create_column(cb: impl Fn(Ref<Rc<Track>>) -> String + 'static) -> SignalListI
 pub fn create_playlist_view(
   playlist_store: ListStore,
   sink_rc: &Rc<RefCell<Sink>>,
-  stream_handle: &Rc<OutputStreamHandle>,
 ) -> ScrolledWindow {
   let playlist_sel = MultiSelection::new(Some(playlist_store));
   let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
@@ -78,7 +77,6 @@ pub fn create_playlist_view(
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
 
-  let stream_handle_rc1 = stream_handle.clone();
   let sink = sink_rc.clone();
   playlist_columnview.connect_activate(move |columnview, pos| {
     let selection = columnview.model().unwrap();
@@ -91,7 +89,7 @@ pub fn create_playlist_view(
     let file = BufReader::new(File::open(f1).unwrap());
     let source = Decoder::new(file).unwrap();
 
-    let mut sink = sink.borrow_mut();
+    let sink = sink.borrow_mut();
     if !sink.empty() {
       sink.stop();
     }
@@ -99,7 +97,7 @@ pub fn create_playlist_view(
     // kill and recreate sink, xref
     // https://github.com/betta-cyber/netease-music-tui/pull/27/
     // https://github.com/RustAudio/rodio/issues/315
-    *sink = rodio::Sink::try_new(&stream_handle_rc1).unwrap();
+    sink.stop();
     sink.append(source);
     sink.play();
 
