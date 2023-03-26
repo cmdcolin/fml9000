@@ -72,7 +72,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let album_art = Image::builder().vexpand(true).build();
 
   let album_art_rc = Rc::new(album_art);
-  let _album_art_rc1 = album_art_rc.clone();
+  let album_art_rc1 = album_art_rc.clone();
 
   let rows_rc = Rc::new(load_tracks());
   let rows_rc1 = rows_rc.clone();
@@ -98,7 +98,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   load_playlist_store(rows_rc.iter(), &playlist_store);
   load_facet_store(&rows_rc1, &facet_store);
 
-  let playlist_wnd = create_playlist_view(playlist_store.clone(), &sink_refcell_rc);
+  let playlist_wnd = create_playlist_view(playlist_store.clone(), &sink_refcell_rc, &album_art_rc1);
   let playlist_mgr_wnd = create_playlist_manager(&playlist_mgr_store);
   let facet_box = create_facet_box(playlist_store, facet_store, filter, &rows_rc);
 
