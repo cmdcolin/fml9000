@@ -123,7 +123,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .build();
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
-  let rss_ui = gtk::Box::new(Orientation::Vertical, 0);
 
   let button_box = create_header_bar(settings_rc, sink_refcell_rc1, &wnd_rc);
 
@@ -131,9 +130,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   main_ui.append(&lrpane);
   let notebook = Notebook::new();
   let lab1 = create_widget("Library");
-  let lab2 = create_widget("RSS");
   notebook.append_page(&main_ui, Some(&lab1));
-  notebook.append_page(&rss_ui, Some(&lab2));
   wnd_rc.set_child(Some(&notebook));
   wnd_rc.show();
 }
