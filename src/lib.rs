@@ -10,7 +10,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use directories::ProjectDirs;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
-use lofty::{Accessor, ItemKey, Probe};
+use lofty::{Accessor, ItemKey, Probe, TaggedFileExt};
 use std::collections::HashSet;
 use std::rc::Rc;
 use walkdir::WalkDir;
@@ -57,7 +57,7 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
         if !hash.contains(&path_str) {
           let tagged_file = Probe::open(&path_str)
             .expect("ERROR: Bad path provided!")
-            .read(true);
+            .read();
           match tagged_file {
             Ok(tagged_file) => {
               let tag = match tagged_file.primary_tag() {
@@ -69,12 +69,12 @@ pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
                   diesel::insert_into(tracks::table)
                     .values(NewTrack {
                       filename: &path_str,
-                      artist: t.artist(),
-                      album: t.album(),
+                      artist: t.artist().as_deref(),
+                      album: t.album().as_deref(),
                       album_artist: t.get_string(&ItemKey::AlbumArtist),
-                      title: t.title(),
+                      title: t.title().as_deref(),
                       track: t.get_string(&ItemKey::TrackNumber),
-                      genre: t.artist(),
+                      genre: t.genre().as_deref(),
                     })
                     .execute(&mut conn);
                 }

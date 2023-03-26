@@ -7,14 +7,15 @@ license = "MIT"
 [dependencies]
 diesel = { version = "2.0", features = ["sqlite", "chrono", "uuid"] }
 diesel_migrations = { version = "2.0", features = ["sqlite"] }
-directories = "4.0"
+directories = "5.0"
 chrono = "0.4.23"
 gtk = { version = "0.6", package = "gtk4", features = ["v4_8"]  }
-lofty = "0.8"
-notify = "4"
+lofty = "0.11"
+notify = "5"
 regex = "1"
 rodio = "0.17"
 serde_derive = "1"
 serde = "1"
-toml = "0.5"
+toml = "0.7"
 walkdir = "2"
+adw = { version = "0.3.1", package = "libadwaita" }
