@@ -1,7 +1,7 @@
 use crate::gtk_helpers::{create_button, load_img};
 use crate::settings::FmlSettings;
 use gtk::glib::MainContext;
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{Adjustment, Orientation, Scale, VolumeButton};
 use rodio::Sink;
 use std::cell::RefCell;

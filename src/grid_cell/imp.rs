@@ -1,6 +1,6 @@
 use gtk::glib;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
+use adw::prelude::*;
+use adw::subclass::prelude::*;
 
 use gtk::BinLayout;
 use gtk::CompositeTemplate;

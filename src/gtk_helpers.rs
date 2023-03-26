@@ -2,7 +2,7 @@ use crate::grid_cell::GridCell;
 use fml9000::models::Track;
 use gtk::gdk;
 use gtk::glib::{BoxedAnyObject, Object};
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{Button, Image, Label, ListItem, MultiSelection, SelectionModel};
 
 pub fn str_or_unknown(str: &Option<String>) -> String {

@@ -6,7 +6,7 @@ use fml9000::models::Track;
 use fml9000::{load_playlist_store, Facet};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{
   ColumnView, ColumnViewColumn, CustomFilter, CustomSorter, FilterListModel, MultiSelection,
   Orientation, ScrolledWindow, SearchEntry, SignalListItemFactory, SortListModel,

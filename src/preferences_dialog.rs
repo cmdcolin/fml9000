@@ -1,6 +1,6 @@
 use crate::settings::{write_settings, FmlSettings};
 use gtk::glib;
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{Button, Entry, FileChooserAction, FileChooserDialog, Orientation, ResponseType};
 use std::cell::RefCell;
 use std::rc::Rc;

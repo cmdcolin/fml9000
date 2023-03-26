@@ -15,7 +15,7 @@ use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
 use adw::Application;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned};
 use gtk_helpers::create_widget;
 use header_bar::create_header_bar;
