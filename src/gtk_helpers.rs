@@ -1,9 +1,9 @@
 use crate::grid_cell::GridCell;
+use adw::prelude::*;
 use fml9000::models::Track;
 use gtk::gdk;
 use gtk::glib::{BoxedAnyObject, Object};
-use adw::prelude::*;
-use gtk::{Button, Image, Label, ListItem, MultiSelection, SelectionModel};
+use gtk::{Button, Image, ListItem, MultiSelection, SelectionModel};
 
 pub fn str_or_unknown(str: &Option<String>) -> String {
   str.as_ref().unwrap_or(&"(Unknown)".to_string()).to_string()
@@ -47,8 +47,4 @@ pub fn load_img(a: &[u8]) -> Image {
 
 pub fn create_button(img: &Image) -> Button {
   Button::builder().child(img).build()
-}
-
-pub fn create_widget<'r>(label: &str) -> gtk::Widget {
-  Label::new(Some(label)).into()
 }

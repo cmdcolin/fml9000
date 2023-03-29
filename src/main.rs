@@ -12,12 +12,11 @@ use facet_box::create_facet_box;
 
 use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
 
+use adw::prelude::*;
 use adw::Application;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
-use adw::prelude::*;
-use gtk::{ApplicationWindow, CustomFilter, Image, Notebook, Orientation, Paned};
-use gtk_helpers::create_widget;
+use gtk::{ApplicationWindow, CustomFilter, Image, Orientation, Paned};
 use header_bar::create_header_bar;
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
@@ -56,24 +55,11 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   load_css::load_css();
 
   let filter = CustomFilter::new(|_| true);
-
   let playlist_store = ListStore::new(BoxedAnyObject::static_type());
   let playlist_mgr_store = ListStore::new(BoxedAnyObject::static_type());
-
-  let source = gtk::DragSource::new();
-  source.connect_drag_begin(|_, _| {
-    println!("k1");
-  });
-
-  source.connect_drag_end(|_, _, _| {
-    println!("k2");
-  });
-
   let album_art = Image::builder().vexpand(true).build();
-
   let album_art_rc = Rc::new(album_art);
   let album_art_rc1 = album_art_rc.clone();
-
   let rows_rc = Rc::new(load_tracks());
   let rows_rc1 = rows_rc.clone();
   let rows_rc2 = rows_rc.clone();
@@ -129,9 +115,6 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
 
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
-  let notebook = Notebook::new();
-  let lab1 = create_widget("Library");
-  notebook.append_page(&main_ui, Some(&lab1));
-  wnd_rc.set_child(Some(&notebook));
+  wnd_rc.set_child(Some(&main_ui));
   wnd_rc.show();
 }
