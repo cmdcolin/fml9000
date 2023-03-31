@@ -8,12 +8,10 @@ mod playlist_view;
 mod preferences_dialog;
 mod settings;
 
-use facet_box::create_facet_box;
-
-use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
-
 use adw::prelude::*;
 use adw::Application;
+use facet_box::create_facet_box;
+use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::{ApplicationWindow, CustomFilter, Image, Orientation, Paned};
@@ -46,7 +44,7 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
     .build();
 
   let wnd_rc = Rc::new(wnd);
-  let _wnd_rc1 = wnd_rc.clone();
+  let wnd_rc1 = wnd_rc.clone();
   let sink_refcell_rc = Rc::new(RefCell::new(Sink::try_new(&stream_handle).unwrap()));
   let sink_refcell_rc1 = sink_refcell_rc.clone();
 
@@ -55,8 +53,8 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   load_css::load_css();
 
   let filter = CustomFilter::new(|_| true);
-  let playlist_store = ListStore::new(BoxedAnyObject::static_type());
-  let playlist_mgr_store = ListStore::new(BoxedAnyObject::static_type());
+  let playlist_store = ListStore::new::<BoxedAnyObject>();
+  let playlist_mgr_store = ListStore::new::<BoxedAnyObject>();
   let album_art = Image::builder().vexpand(true).build();
   let album_art_rc = Rc::new(album_art);
   let album_art_rc1 = album_art_rc.clone();
@@ -80,11 +78,16 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   let elapsed = now.elapsed();
   println!("Elapsed: {:.2?}", elapsed);
 
-  let facet_store = ListStore::new(BoxedAnyObject::static_type());
+  let facet_store = ListStore::new::<BoxedAnyObject>();
   load_playlist_store(rows_rc.iter(), &playlist_store);
   load_facet_store(&rows_rc1, &facet_store);
 
-  let playlist_wnd = create_playlist_view(playlist_store.clone(), &sink_refcell_rc, &album_art_rc1);
+  let playlist_wnd = create_playlist_view(
+    playlist_store.clone(),
+    &sink_refcell_rc,
+    &album_art_rc1,
+    &wnd_rc1,
+  );
   let playlist_mgr_wnd = create_playlist_manager(&playlist_mgr_store);
   let facet_box = create_facet_box(playlist_store, facet_store, filter, &rows_rc);
 

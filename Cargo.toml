@@ -5,12 +5,12 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-diesel = { version = "2.0", features = ["sqlite", "chrono", "uuid"] }
-diesel_migrations = { version = "2.0", features = ["sqlite"] }
+diesel = { version = "2.1", features = ["sqlite", "chrono", "uuid"] }
+diesel_migrations = { version = "2.1", features = ["sqlite"] }
 directories = "5.0"
-chrono = "0.4.23"
-gtk = { version = "0.6", package = "gtk4", features = ["v4_8"]  }
-lofty = "0.11"
+chrono = "0.4"
+gtk = { version = "0.7", package = "gtk4", features = ["v4_8"]  }
+lofty = "0.13"
 notify = "5"
 regex = "1"
 rodio = "0.17"
@@ -18,4 +18,4 @@ serde_derive = "1"
 serde = "1"
 toml = "0.7"
 walkdir = "2"
-adw = { version = "0.3.1", package = "libadwaita" }
+adw = { version = "0.5", package = "libadwaita" }

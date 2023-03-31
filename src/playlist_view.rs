@@ -1,10 +1,12 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, get_playlist_activate_selection, setup_col, str_or_unknown};
+use adw::prelude::*;
 use fml9000::add_track_to_recently_played;
 use fml9000::models::Track;
 use gtk::gio::ListStore;
 use gtk::{
-  ColumnView, ColumnViewColumn, Image, MultiSelection, ScrolledWindow, SignalListItemFactory,
+  ApplicationWindow, ColumnView, ColumnViewColumn, Image, MultiSelection, ScrolledWindow,
+  SignalListItemFactory,
 };
 use rodio::{Decoder, Sink};
 use std::cell::{Ref, RefCell};
@@ -28,6 +30,7 @@ pub fn create_playlist_view(
   playlist_store: ListStore,
   sink: &Rc<RefCell<Sink>>,
   album_art: &Rc<Image>,
+  wnd_rc: &Rc<ApplicationWindow>,
 ) -> ScrolledWindow {
   let playlist_sel = MultiSelection::new(Some(playlist_store));
   let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
@@ -82,6 +85,8 @@ pub fn create_playlist_view(
   playlist_columnview.append_column(&playlist_col4);
 
   let sink = sink.clone();
+  let wnd = wnd_rc.clone();
+
   playlist_columnview.connect_activate(move |columnview, pos| {
     let selection = columnview.model().unwrap();
     let item = get_playlist_activate_selection(&selection, pos);
@@ -112,17 +117,15 @@ pub fn create_playlist_view(
     p.push("cover.jpg");
     album_art_rc.set_from_file(Some(p));
 
-    // wnd1.set_title(Some(&format!(
-    //   "fml9000 // {} - {} - {}",
-    //   str_or_unknown(&r.artist),
-    //   str_or_unknown(&r.album),
-    //   str_or_unknown(&r.title),
-    // )));
+    wnd.set_title(Some(&format!(
+      "fml9000 // {} - {} - {}",
+      str_or_unknown(&r.artist),
+      str_or_unknown(&r.album),
+      str_or_unknown(&r.title),
+    )));
   });
 
-  let playlist_wnd = ScrolledWindow::builder()
+  ScrolledWindow::builder()
     .child(&playlist_columnview)
-    .build();
-
-  playlist_wnd
+    .build()
 }
