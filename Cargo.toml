@@ -9,13 +9,13 @@ diesel = { version = "2.1", features = ["sqlite", "chrono", "uuid"] }
 diesel_migrations = { version = "2.1", features = ["sqlite"] }
 directories = "5.0"
 chrono = "0.4"
-gtk = { version = "0.7", package = "gtk4", features = ["v4_8"]  }
-lofty = "0.13"
-notify = "5"
+gtk = { version = "0.8", package = "gtk4", features = ["v4_8"]  }
+lofty = "0"
+notify = "6"
 regex = "1"
 rodio = "0.17"
 serde_derive = "1"
 serde = "1"
-toml = "0.7"
+toml = "0.8"
 walkdir = "2"
-adw = { version = "0.5", package = "libadwaita" }
+adw = { version = "0.6", package = "libadwaita" }
