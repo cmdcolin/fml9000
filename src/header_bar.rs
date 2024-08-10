@@ -1,11 +1,18 @@
 use crate::gtk_helpers::{create_button, load_img};
 use crate::settings::FmlSettings;
-use gtk::glib::MainContext;
 use adw::prelude::*;
-use gtk::{Adjustment, Orientation, Scale, VolumeButton};
+use gtk::glib::MainContext;
+use gtk::{Adjustment, Orientation, Scale, ScaleButton};
 use rodio::Sink;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+static PREV_SVG: &[u8] = include_bytes!("img/prev.svg");
+static STOP_SVG: &[u8] = include_bytes!("img/stop.svg");
+static NEXT_SVG: &[u8] = include_bytes!("img/next.svg");
+static PAUSE_SVG: &[u8] = include_bytes!("img/pause.svg");
+static PLAY_SVG: &[u8] = include_bytes!("img/play.svg");
+static SETTINGS_SVG: &[u8] = include_bytes!("img/settings.svg");
 
 pub fn create_header_bar(
   settings: Rc<RefCell<FmlSettings>>,
@@ -16,12 +23,13 @@ pub fn create_header_bar(
   let sink2 = sink.clone();
   let sink3 = sink.clone();
   let wnd1 = wnd.clone();
-  let prev_btn = create_button(&load_img(include_bytes!("img/prev.svg")));
-  let stop_btn = create_button(&load_img(include_bytes!("img/stop.svg")));
-  let next_btn = create_button(&load_img(include_bytes!("img/next.svg")));
-  let pause_btn = create_button(&load_img(include_bytes!("img/pause.svg")));
-  let play_btn = create_button(&load_img(include_bytes!("img/play.svg")));
-  let settings_btn = create_button(&load_img(include_bytes!("img/settings.svg")));
+
+  let prev_btn = create_button(&load_img(PREV_SVG));
+  let stop_btn = create_button(&load_img(STOP_SVG));
+  let next_btn = create_button(&load_img(NEXT_SVG));
+  let pause_btn = create_button(&load_img(PAUSE_SVG));
+  let play_btn = create_button(&load_img(PLAY_SVG));
+  let settings_btn = create_button(&load_img(SETTINGS_SVG));
 
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
   let seek_slider = Scale::builder()
@@ -30,7 +38,7 @@ pub fn create_header_bar(
     .adjustment(&Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0))
     .build();
 
-  let volume_button = VolumeButton::builder()
+  let volume_button = ScaleButton::builder()
     .value({
       let s = settings.borrow();
       s.volume

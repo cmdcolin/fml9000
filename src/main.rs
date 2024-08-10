@@ -119,5 +119,5 @@ fn app_main(application: &Application, stream_handle: &Rc<OutputStreamHandle>) {
   main_ui.append(&button_box);
   main_ui.append(&lrpane);
   wnd_rc.set_child(Some(&main_ui));
-  wnd_rc.show();
+  wnd_rc.present();
 }

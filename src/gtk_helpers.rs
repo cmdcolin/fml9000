@@ -2,7 +2,7 @@ use crate::grid_cell::GridCell;
 use adw::prelude::*;
 use fml9000::models::Track;
 use gtk::gdk;
-use gtk::glib::{BoxedAnyObject, Object};
+use gtk::glib::{BoxedAnyObject, Bytes, Object};
 use gtk::{Button, Image, ListItem, MultiSelection, SelectionModel};
 
 pub fn str_or_unknown(str: &Option<String>) -> String {
@@ -35,13 +35,14 @@ pub fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedA
   sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
 }
 
-pub fn load_img(a: &[u8]) -> Image {
+pub fn load_img(a: &'static [u8]) -> Image {
   let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(a).unwrap();
+  loader.write(&a).unwrap();
   loader.close().unwrap();
-  let pixbuf = loader.pixbuf().unwrap();
-  let img = Image::new();
-  img.set_from_pixbuf(Some(&pixbuf));
+
+  let bytes = Bytes::from_static(&a);
+  let logo = gdk::Texture::from_bytes(&bytes).unwrap();
+  let img = Image::builder().paintable(&logo).build();
   img
 }
 
