@@ -7,7 +7,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-
 jobs:
   check:
     name: Build
@@ -26,9 +25,9 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
       - name: deps
-        run:  |
-          apt update
-          apt install --yes libasound2-dev
+        run: |
+          sudo apt update
+          sudo apt install --yes libasound2-dev
 
       - name: build
         run: cargo build
