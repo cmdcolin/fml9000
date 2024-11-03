@@ -9,11 +9,11 @@ diesel = { version = "2.1", features = ["sqlite", "chrono", "uuid"] }
 diesel_migrations = { version = "2.1", features = ["sqlite"] }
 directories = "5.0"
 chrono = "0.4"
-gtk = { version = "0.9", package = "gtk4", features = ["v4_12"] }
+gtk = { version = "0.9", package = "gtk4", features = ["v4_16"] }
 lofty = "0"
-notify = "6"
+notify = "7"
 regex = "1"
-rodio = "0.19"
+rodio = "0.20"
 serde_derive = "1"
 serde = "1"
 toml = "0.8"
