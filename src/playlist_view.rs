@@ -1,6 +1,6 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, get_playlist_activate_selection, setup_col, str_or_unknown};
-use crate::AudioState;
+use crate::AudioPlayer;
 use adw::prelude::*;
 use fml9000::add_track_to_recently_played;
 use fml9000::models::Track;
@@ -10,7 +10,7 @@ use gtk::{
   ScrolledWindow, SignalListItemFactory,
 };
 use rodio::Decoder;
-use std::cell::{Ref, RefCell};
+use std::cell::Ref;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ fn create_column(cb: impl Fn(Ref<Rc<Track>>) -> String + 'static) -> SignalListI
 
 pub fn create_playlist_view(
   playlist_store: ListStore,
-  audio: &Rc<RefCell<Option<AudioState>>>,
+  audio: AudioPlayer,
   album_art: &Rc<Image>,
   wnd_rc: &Rc<ApplicationWindow>,
 ) -> ScrolledWindow {
@@ -95,7 +95,6 @@ pub fn create_playlist_view(
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
 
-  let sink = Rc::clone(sink);
   let window = Rc::clone(wnd_rc);
 
   playlist_columnview.connect_activate(move |columnview, pos| {
@@ -103,6 +102,11 @@ pub fn create_playlist_view(
     let item = get_playlist_activate_selection(&selection, pos);
     let track: Ref<Rc<Track>> = item.borrow();
     let filename = &track.filename;
+
+    if !audio.is_available() {
+      show_error_dialog(&window, "No Audio", "Audio playback is not available.");
+      return;
+    }
 
     let file = match File::open(filename) {
       Ok(f) => BufReader::new(f),
@@ -128,13 +132,7 @@ pub fn create_playlist_view(
       }
     };
 
-    // Stop and restart sink to work around rodio issue
-    // https://github.com/RustAudio/rodio/issues/315
-    let sink = sink.borrow_mut();
-    sink.stop();
-    sink.append(source);
-    sink.play();
-
+    audio.play_source(source);
     add_track_to_recently_played(filename);
 
     let mut cover_path = PathBuf::from(filename);

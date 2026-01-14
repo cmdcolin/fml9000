@@ -1,9 +1,9 @@
 use crate::gtk_helpers::{create_button, load_img};
 use crate::settings::FmlSettings;
+use crate::AudioPlayer;
 use adw::prelude::*;
 use gtk::glib::MainContext;
 use gtk::{Adjustment, Orientation, Scale, ScaleButton};
-use rodio::Sink;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -16,12 +16,13 @@ static SETTINGS_SVG: &[u8] = include_bytes!("img/settings.svg");
 
 pub fn create_header_bar(
   settings: Rc<RefCell<FmlSettings>>,
-  sink: Rc<RefCell<Sink>>,
+  audio: AudioPlayer,
   window: &Rc<gtk::ApplicationWindow>,
 ) -> gtk::Box {
-  let sink_for_pause = Rc::clone(&sink);
-  let sink_for_play = Rc::clone(&sink);
-  let sink_for_stop = Rc::clone(&sink);
+  let audio_for_volume = audio.clone();
+  let audio_for_pause = audio.clone();
+  let audio_for_play = audio.clone();
+  let audio_for_stop = audio.clone();
   let window_for_settings = Rc::clone(window);
 
   let prev_btn = create_button(&load_img(PREV_SVG));
@@ -44,15 +45,14 @@ pub fn create_header_bar(
       s.volume
     })
     .build();
-  let settings1 = settings.clone();
+  let settings_for_volume = Rc::clone(&settings);
   volume_button.connect_value_changed(move |_, volume| {
-    let sink = sink.borrow();
-    let mut s = settings1.borrow_mut();
+    audio_for_volume.set_volume(volume as f32);
+    let mut s = settings_for_volume.borrow_mut();
     s.volume = volume;
     if let Err(e) = crate::settings::write_settings(&s) {
       eprintln!("Warning: {e}");
     }
-    sink.set_volume(volume as f32);
   });
 
   button_box.append(&settings_btn);
@@ -65,15 +65,15 @@ pub fn create_header_bar(
   button_box.append(&volume_button);
 
   pause_btn.connect_clicked(move |_| {
-    sink_for_pause.borrow().pause();
+    audio_for_pause.pause();
   });
 
   play_btn.connect_clicked(move |_| {
-    sink_for_play.borrow().play();
+    audio_for_play.play();
   });
 
   stop_btn.connect_clicked(move |_| {
-    sink_for_stop.borrow().stop();
+    audio_for_stop.stop();
   });
 
   settings_btn.connect_clicked(move |_| {

@@ -24,20 +24,84 @@ use std::rc::Rc;
 
 const APP_ID: &str = "com.github.fml9000";
 
-pub struct AudioState {
+struct AudioState {
   _stream: OutputStream,
-  pub sink: Sink,
+  sink: Sink,
 }
 
-fn init_audio() -> Result<AudioState, String> {
-  let (stream, handle) = OutputStream::try_default()
-    .map_err(|e| format!("Failed to initialize audio output: {e}"))?;
-  let sink =
-    Sink::try_new(&handle).map_err(|e| format!("Failed to create audio sink: {e}"))?;
-  Ok(AudioState {
-    _stream: stream,
-    sink,
-  })
+#[derive(Clone)]
+pub struct AudioPlayer {
+  inner: Rc<RefCell<Option<AudioState>>>,
+}
+
+impl AudioPlayer {
+  pub fn new() -> (Self, Option<String>) {
+    let (inner, error) = match Self::init_audio() {
+      Ok(state) => (Some(state), None),
+      Err(e) => (None, Some(e)),
+    };
+    (
+      Self {
+        inner: Rc::new(RefCell::new(inner)),
+      },
+      error,
+    )
+  }
+
+  fn init_audio() -> Result<AudioState, String> {
+    let (stream, handle) = OutputStream::try_default()
+      .map_err(|e| format!("Failed to initialize audio output: {e}"))?;
+    let sink =
+      Sink::try_new(&handle).map_err(|e| format!("Failed to create audio sink: {e}"))?;
+    Ok(AudioState {
+      _stream: stream,
+      sink,
+    })
+  }
+
+  pub fn is_available(&self) -> bool {
+    self.inner.borrow().is_some()
+  }
+
+  pub fn play(&self) {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.play();
+    }
+  }
+
+  pub fn pause(&self) {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.pause();
+    }
+  }
+
+  pub fn stop(&self) {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.stop();
+    }
+  }
+
+  pub fn set_volume(&self, volume: f32) {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.set_volume(volume);
+    }
+  }
+
+  pub fn play_source<S>(&self, source: S) -> bool
+  where
+    S: rodio::Source + Send + 'static,
+    S::Item: rodio::Sample + Send,
+    f32: rodio::cpal::FromSample<S::Item>,
+  {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.stop();
+      audio.sink.append(source);
+      audio.sink.play();
+      true
+    } else {
+      false
+    }
+  }
 }
 
 fn show_error_dialog(window: &ApplicationWindow, title: &str, message: &str) {
@@ -71,16 +135,20 @@ fn app_main(application: &Application) {
       .build(),
   );
 
-  let audio = match init_audio() {
-    Ok(audio) => Some(audio),
+  let (audio, audio_error) = AudioPlayer::new();
+  if let Some(e) = audio_error {
+    show_error_dialog(&window, "Audio Error", &format!("{e}\n\nPlayback will be disabled."));
+  }
+
+  let settings = Rc::new(RefCell::new(crate::settings::read_settings()));
+
+  let tracks = match load_tracks() {
+    Ok(t) => Rc::new(t),
     Err(e) => {
-      show_error_dialog(&window, "Audio Error", &format!("{e}\n\nPlayback will be disabled."));
-      None
+      show_error_dialog(&window, "Database Error", &format!("{e}\n\nLibrary will be empty."));
+      Rc::new(Vec::new())
     }
   };
-  let sink = Rc::new(RefCell::new(audio));
-  let settings = Rc::new(RefCell::new(crate::settings::read_settings()));
-  let tracks = Rc::new(load_tracks());
 
   if let Some(folder) = &settings.borrow().folder {
     run_scan(folder, &tracks);
@@ -97,7 +165,7 @@ fn app_main(application: &Application) {
 
   let playlist_view = create_playlist_view(
     playlist_store.clone(),
-    &sink,
+    audio.clone(),
     &album_art,
     &window,
   );
@@ -130,7 +198,7 @@ fn app_main(application: &Application) {
     .build();
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
-  let header = create_header_bar(Rc::clone(&settings), Rc::clone(&sink), &window);
+  let header = create_header_bar(Rc::clone(&settings), audio, &window);
 
   main_ui.append(&header);
   main_ui.append(&main_pane);

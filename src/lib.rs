@@ -32,12 +32,20 @@ pub struct Facet {
   pub all: bool,
 }
 
-pub fn connect_db() -> SqliteConnection {
-  let proj_dirs = ProjectDirs::from("com", "github", "fml9000").unwrap();
+fn get_project_dirs() -> Option<ProjectDirs> {
+  ProjectDirs::from("com", "github", "fml9000")
+}
+
+pub fn connect_db() -> Result<SqliteConnection, String> {
+  let proj_dirs =
+    get_project_dirs().ok_or_else(|| "Could not determine config directory".to_string())?;
   let path = proj_dirs.config_dir().join("library.db");
-  let database_url = format!("sqlite://{}", path.to_str().unwrap());
+  let path_str = path
+    .to_str()
+    .ok_or_else(|| "Database path contains invalid UTF-8".to_string())?;
+  let database_url = format!("sqlite://{}", path_str);
   SqliteConnection::establish(&database_url)
-    .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+    .map_err(|e| format!("Error connecting to database: {e}"))
 }
 
 fn hashset(data: &[Rc<Track>]) -> HashSet<&String> {
@@ -46,7 +54,13 @@ fn hashset(data: &[Rc<Track>]) -> HashSet<&String> {
 
 pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
   let existing_files = hashset(rows);
-  let mut conn = connect_db();
+  let mut conn = match connect_db() {
+    Ok(c) => c,
+    Err(e) => {
+      eprintln!("Warning: Could not connect to database for scanning: {e}");
+      return;
+    }
+  };
   let chunk_size = 20;
 
   let walker = WalkDir::new(folder)
@@ -64,10 +78,11 @@ pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
         continue;
       }
 
-      let Ok(tagged_file) = Probe::open(&path_str)
-        .expect("ERROR: Bad path provided!")
-        .read()
-      else {
+      let Ok(probe) = Probe::open(&path_str) else {
+        continue;
+      };
+
+      let Ok(tagged_file) = probe.read() else {
         continue;
       };
 
@@ -95,7 +110,9 @@ pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
 pub fn add_track_to_recently_played(path: &str) {
   use self::schema::recently_played;
 
-  let mut conn = connect_db();
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
   let _ = diesel::replace_into(recently_played::table)
     .values(NewRecentlyPlayed { filename: path })
     .execute(&mut conn);
@@ -105,30 +122,31 @@ pub fn load_recently_played(limit: i64) -> Vec<Rc<Track>> {
   use self::schema::recently_played::dsl as rp;
   use self::schema::tracks::dsl as t;
 
-  let conn = &mut connect_db();
+  let Ok(mut conn) = connect_db() else {
+    return Vec::new();
+  };
 
   t::tracks
     .inner_join(rp::recently_played.on(t::filename.eq(rp::filename)))
     .order(rp::timestamp.desc())
     .limit(limit)
     .select(Track::as_select())
-    .load::<Track>(conn)
+    .load::<Track>(&mut conn)
     .unwrap_or_default()
     .into_iter()
     .map(Rc::new)
     .collect()
 }
 
-pub fn load_tracks() -> Vec<Rc<Track>> {
+pub fn load_tracks() -> Result<Vec<Rc<Track>>, String> {
   use self::schema::tracks::dsl::*;
 
-  let conn = &mut connect_db();
+  let mut conn = connect_db()?;
+
   tracks
-    .load::<Track>(conn)
-    .expect("Error loading tracks")
-    .into_iter()
-    .map(Rc::new)
-    .collect()
+    .load::<Track>(&mut conn)
+    .map(|v| v.into_iter().map(Rc::new).collect())
+    .map_err(|e| format!("Error loading tracks: {e}"))
 }
 
 pub fn load_playlist_store<'a, I>(vals: I, store: &gio::ListStore)
