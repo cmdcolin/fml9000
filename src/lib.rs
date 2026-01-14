@@ -20,7 +20,7 @@ use walkdir::WalkDir;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
-fn run_migration(conn: &mut SqliteConnection) {
+pub fn run_migration(conn: &mut SqliteConnection) {
   conn.run_pending_migrations(MIGRATIONS).unwrap();
 }
 
@@ -40,72 +40,95 @@ pub fn connect_db() -> SqliteConnection {
     .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }
 
-fn hashset(data: &Vec<Rc<Track>>) -> HashSet<&std::string::String> {
-  HashSet::from_iter(data.iter().map(|elt| &elt.filename))
+fn hashset(data: &[Rc<Track>]) -> HashSet<&String> {
+  data.iter().map(|elt| &elt.filename).collect()
 }
 
-pub fn run_scan(folder: &str, rows: &Vec<Rc<Track>>) {
-  let hash = hashset(rows);
+pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
+  let existing_files = hashset(rows);
   let mut conn = connect_db();
-  let transaction_size = 20;
+  let chunk_size = 20;
 
-  for chunk in chunked_iterator::ChunkedIterator::new(
-    WalkDir::new(folder).into_iter().filter_map(|e| e.ok()),
-    transaction_size,
-  ) {
-    for file in chunk {
-      if file.file_type().is_file() {
-        let path = file.path();
-        let path_str = path.display().to_string();
-        if !hash.contains(&path_str) {
-          let tagged_file = Probe::open(&path_str)
-            .expect("ERROR: Bad path provided!")
-            .read();
-          match tagged_file {
-            Ok(tagged_file) => {
-              let tag = match tagged_file.primary_tag() {
-                Some(primary_tag) => Some(primary_tag),
-                None => tagged_file.first_tag(),
-              };
-              match tag {
-                Some(t) => {
-                  diesel::insert_into(tracks::table)
-                    .values(NewTrack {
-                      filename: &path_str,
-                      artist: t.artist().as_deref(),
-                      album: t.album().as_deref(),
-                      album_artist: t.get_string(&ItemKey::AlbumArtist),
-                      title: t.title().as_deref(),
-                      track: t.get_string(&ItemKey::TrackNumber),
-                      genre: t.genre().as_deref(),
-                    })
-                    .execute(&mut conn);
-                }
-                None => (),
-              }
-            }
-            Err(_) => (),
-          };
-        }
+  let walker = WalkDir::new(folder)
+    .into_iter()
+    .filter_map(|e| e.ok());
+
+  for chunk in chunked_iterator::ChunkedIterator::new(walker, chunk_size) {
+    for entry in chunk {
+      if !entry.file_type().is_file() {
+        continue;
+      }
+
+      let path_str = entry.path().display().to_string();
+      if existing_files.contains(&path_str) {
+        continue;
+      }
+
+      let Ok(tagged_file) = Probe::open(&path_str)
+        .expect("ERROR: Bad path provided!")
+        .read()
+      else {
+        continue;
+      };
+
+      let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+
+      if let Some(t) = tag {
+        let _ = diesel::insert_into(tracks::table)
+          .values(NewTrack {
+            filename: &path_str,
+            artist: t.artist().as_deref(),
+            album: t.album().as_deref(),
+            album_artist: t.get_string(&ItemKey::AlbumArtist),
+            title: t.title().as_deref(),
+            track: t.get_string(&ItemKey::TrackNumber),
+            genre: t.genre().as_deref(),
+          })
+          .execute(&mut conn);
       }
     }
   }
 }
 
-pub fn add_track_to_recently_played(_path: &str) -> () {
-  // let conn = connect_db();
-  // conn.execute("INSERT INTO recently_played (filename) VALUES (?)", (path,))?;
+pub fn add_track_to_recently_played(path: &str) {
+  use self::schema::recently_played;
 
-  // Ok(())
+  let mut conn = connect_db();
+  let _ = diesel::replace_into(recently_played::table)
+    .values(NewRecentlyPlayed { filename: path })
+    .execute(&mut conn);
+}
+
+pub fn load_recently_played(limit: i64) -> Vec<Rc<Track>> {
+  use self::schema::recently_played::dsl as rp;
+  use self::schema::tracks::dsl as t;
+
+  let conn = &mut connect_db();
+
+  t::tracks
+    .inner_join(rp::recently_played.on(t::filename.eq(rp::filename)))
+    .order(rp::timestamp.desc())
+    .limit(limit)
+    .select(Track::as_select())
+    .load::<Track>(conn)
+    .unwrap_or_default()
+    .into_iter()
+    .map(Rc::new)
+    .collect()
 }
 
 pub fn load_tracks() -> Vec<Rc<Track>> {
   use self::schema::tracks::dsl::*;
 
   let conn = &mut connect_db();
-  let results = tracks.load::<Track>(conn).expect("Error loading tracks");
-
-  results.into_iter().map(|r| Rc::new(r)).collect()
+  tracks
+    .load::<Track>(conn)
+    .expect("Error loading tracks")
+    .into_iter()
+    .map(Rc::new)
+    .collect()
 }
 
 pub fn load_playlist_store<'a, I>(vals: I, store: &gio::ListStore)

@@ -42,12 +42,17 @@ pub async fn dialog<W: IsA<gtk::Window>>(wnd: Rc<W>, settings: Rc<RefCell<FmlSet
 
       dialog.open(Some(&*wnd), gio::Cancellable::NONE, move |file| {
         if let Ok(file) = file {
-          let p = file.path().expect("Couldn't get file path");
-          let folder = &p.to_string_lossy();
-          textbox.set_text(folder);
+          let Some(p) = file.path() else {
+            eprintln!("Warning: Could not get file path");
+            return;
+          };
+          let folder = p.to_string_lossy();
+          textbox.set_text(&folder);
           let mut s = settings.borrow_mut();
           s.folder = Some(folder.to_string());
-          write_settings(&s).expect("Failed to write");
+          if let Err(e) = write_settings(&s) {
+            eprintln!("Warning: {e}");
+          }
         }
       });
     }

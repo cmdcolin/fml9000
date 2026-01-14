@@ -17,12 +17,12 @@ static SETTINGS_SVG: &[u8] = include_bytes!("img/settings.svg");
 pub fn create_header_bar(
   settings: Rc<RefCell<FmlSettings>>,
   sink: Rc<RefCell<Sink>>,
-  wnd: &Rc<gtk::ApplicationWindow>,
+  window: &Rc<gtk::ApplicationWindow>,
 ) -> gtk::Box {
-  let sink1 = sink.clone();
-  let sink2 = sink.clone();
-  let sink3 = sink.clone();
-  let wnd1 = wnd.clone();
+  let sink_for_pause = Rc::clone(&sink);
+  let sink_for_play = Rc::clone(&sink);
+  let sink_for_stop = Rc::clone(&sink);
+  let window_for_settings = Rc::clone(window);
 
   let prev_btn = create_button(&load_img(PREV_SVG));
   let stop_btn = create_button(&load_img(STOP_SVG));
@@ -49,7 +49,9 @@ pub fn create_header_bar(
     let sink = sink.borrow();
     let mut s = settings1.borrow_mut();
     s.volume = volume;
-    crate::settings::write_settings(&s).expect("Failed to write");
+    if let Err(e) = crate::settings::write_settings(&s) {
+      eprintln!("Warning: {e}");
+    }
     sink.set_volume(volume as f32);
   });
 
@@ -63,25 +65,23 @@ pub fn create_header_bar(
   button_box.append(&volume_button);
 
   pause_btn.connect_clicked(move |_| {
-    let sink = sink1.borrow();
-    sink.pause();
+    sink_for_pause.borrow().pause();
   });
 
   play_btn.connect_clicked(move |_| {
-    let sink = sink2.borrow();
-    sink.play();
+    sink_for_play.borrow().play();
   });
 
   stop_btn.connect_clicked(move |_| {
-    let sink = sink3.borrow();
-    sink.stop()
+    sink_for_stop.borrow().stop();
   });
 
   settings_btn.connect_clicked(move |_| {
     MainContext::default().spawn_local(crate::preferences_dialog::dialog(
-      Rc::clone(&wnd1),
+      Rc::clone(&window_for_settings),
       Rc::clone(&settings),
     ));
   });
-  return button_box;
+
+  button_box
 }

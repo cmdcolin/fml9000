@@ -26,20 +26,21 @@ where
   type Item = Vec<R>;
 
   fn next(&mut self) -> Option<Vec<R>> {
-    while let inner_opt = self.source.next() {
-      match inner_opt {
+    loop {
+      match self.source.next() {
         Some(inner_item) => {
           self.inner.push(inner_item);
           if self.inner.len() > self.size {
             return Some(self.inner.split_off(0));
           }
         }
-        None => match self.inner.len() {
-          0 => return None,
-          _ => return Some(self.inner.split_off(0)),
-        },
+        None => {
+          if self.inner.is_empty() {
+            return None;
+          }
+          return Some(self.inner.split_off(0));
+        }
       }
     }
-    None
   }
 }

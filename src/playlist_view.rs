@@ -1,34 +1,45 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, get_playlist_activate_selection, setup_col, str_or_unknown};
+use crate::AudioState;
 use adw::prelude::*;
 use fml9000::add_track_to_recently_played;
 use fml9000::models::Track;
 use gtk::gio::ListStore;
 use gtk::{
-  ApplicationWindow, ColumnView, ColumnViewColumn, Image, MultiSelection, ScrolledWindow,
-  SignalListItemFactory,
+  AlertDialog, ApplicationWindow, ColumnView, ColumnViewColumn, Image, MultiSelection,
+  ScrolledWindow, SignalListItemFactory,
 };
-use rodio::{Decoder, Sink};
+use rodio::Decoder;
 use std::cell::{Ref, RefCell};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+fn show_error_dialog(window: &ApplicationWindow, title: &str, message: &str) {
+  let dialog = AlertDialog::builder()
+    .modal(true)
+    .message(title)
+    .detail(message)
+    .buttons(["OK"])
+    .build();
+  dialog.show(Some(window));
+}
+
 fn create_column(cb: impl Fn(Ref<Rc<Track>>) -> String + 'static) -> SignalListItemFactory {
-  let col = SignalListItemFactory::new();
-  col.connect_setup(move |_factory, item| setup_col(item));
-  col.connect_bind(move |_factory, item| {
+  let factory = SignalListItemFactory::new();
+  factory.connect_setup(move |_factory, item| setup_col(item));
+  factory.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
-    let r: Ref<Rc<Track>> = obj.borrow();
-    cell.set_entry(&Entry { name: cb(r) });
+    let track: Ref<Rc<Track>> = obj.borrow();
+    cell.set_entry(&Entry { name: cb(track) });
   });
-  return col;
+  factory
 }
 
 pub fn create_playlist_view(
   playlist_store: ListStore,
-  sink: &Rc<RefCell<Sink>>,
+  audio: &Rc<RefCell<Option<AudioState>>>,
   album_art: &Rc<Image>,
   wnd_rc: &Rc<ApplicationWindow>,
 ) -> ScrolledWindow {
@@ -43,9 +54,9 @@ pub fn create_playlist_view(
     )
   });
 
-  let track = create_column(|r| format!("{}", r.track.as_ref().unwrap_or(&"".to_string())));
-  let title = create_column(|r| format!("{}", r.title.as_ref().unwrap_or(&"".to_string())));
-  let filename = create_column(|r| format!("{}", r.filename));
+  let track_num = create_column(|r| r.track.clone().unwrap_or_default());
+  let title = create_column(|r| r.title.clone().unwrap_or_default());
+  let filename = create_column(|r| r.filename.clone());
 
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
@@ -60,7 +71,7 @@ pub fn create_playlist_view(
     .resizable(true)
     .title("#")
     .fixed_width(20)
-    .factory(&track)
+    .factory(&track_num)
     .build();
 
   let playlist_col3 = ColumnViewColumn::builder()
@@ -84,44 +95,58 @@ pub fn create_playlist_view(
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
 
-  let sink = sink.clone();
-  let wnd = wnd_rc.clone();
+  let sink = Rc::clone(sink);
+  let window = Rc::clone(wnd_rc);
 
   playlist_columnview.connect_activate(move |columnview, pos| {
     let selection = columnview.model().unwrap();
     let item = get_playlist_activate_selection(&selection, pos);
-    let r: Ref<Rc<Track>> = item.borrow();
-    let f1 = r.filename.clone();
-    let f2 = r.filename.clone();
-    let f3 = r.filename.clone();
+    let track: Ref<Rc<Track>> = item.borrow();
+    let filename = &track.filename;
 
-    let file = BufReader::new(File::open(f1).unwrap());
-    let source = Decoder::new(file).unwrap();
+    let file = match File::open(filename) {
+      Ok(f) => BufReader::new(f),
+      Err(e) => {
+        show_error_dialog(
+          &window,
+          "Cannot open file",
+          &format!("Failed to open '{filename}':\n{e}"),
+        );
+        return;
+      }
+    };
 
-    let sink = sink.borrow_mut();
-    if !sink.empty() {
-      sink.stop();
-    }
+    let source = match Decoder::new(file) {
+      Ok(s) => s,
+      Err(e) => {
+        show_error_dialog(
+          &window,
+          "Cannot decode file",
+          &format!("Failed to decode '{filename}':\n{e}"),
+        );
+        return;
+      }
+    };
 
-    // kill and recreate sink, xref
-    // https://github.com/betta-cyber/netease-music-tui/pull/27/
+    // Stop and restart sink to work around rodio issue
     // https://github.com/RustAudio/rodio/issues/315
+    let sink = sink.borrow_mut();
     sink.stop();
     sink.append(source);
     sink.play();
 
-    add_track_to_recently_played(&f3);
+    add_track_to_recently_played(filename);
 
-    let mut p = PathBuf::from(f2);
-    p.pop();
-    p.push("cover.jpg");
-    album_art_rc.set_from_file(Some(p));
+    let mut cover_path = PathBuf::from(filename);
+    cover_path.pop();
+    cover_path.push("cover.jpg");
+    album_art_rc.set_from_file(Some(cover_path));
 
-    wnd.set_title(Some(&format!(
+    window.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
-      str_or_unknown(&r.artist),
-      str_or_unknown(&r.album),
-      str_or_unknown(&r.title),
+      str_or_unknown(&track.artist),
+      str_or_unknown(&track.album),
+      str_or_unknown(&track.title),
     )));
   });
 

@@ -38,8 +38,8 @@ pub fn create_facet_box(
   let facet_sel = MultiSelection::new(Some(facet_sort));
   let facet_columnview = ColumnView::builder().model(&facet_sel).build();
 
-  let facet_sel_rc = Rc::new(facet_sel);
-  let facet_sel_rc1 = facet_sel_rc.clone();
+  let facet_selection = Rc::new(facet_sel);
+  let facet_selection_for_handler = Rc::clone(&facet_selection);
   let facet = SignalListItemFactory::new();
 
   let facet_wnd = ScrolledWindow::builder()
@@ -54,34 +54,29 @@ pub fn create_facet_box(
     .sorter(&case_insensitive_sorter)
     .build();
   facet_columnview.append_column(&facet_col);
-  let playlist_store_rc1 = playlist_store.clone();
+  let playlist_store_for_handler = playlist_store.clone();
+  let tracks_for_handler = Rc::clone(tracks);
 
-  let tracks_rc = tracks.clone();
-  facet_sel_rc.connect_selection_changed(move |_, _, _| {
-    let selection = facet_sel_rc1.selection();
-    match gtk::BitsetIter::init_first(&selection) {
-      Some(result) => {
-        let (iter, first_pos) = result;
-        playlist_store_rc1.remove_all();
-        let item = get_selection(&facet_sel_rc1, first_pos);
-        let r: Ref<Facet> = item.borrow();
-        let con = tracks_rc.iter().filter(|x| {
-          get_album_artist_or_artist(x) == r.album_artist_or_artist && x.album == r.album
+  facet_selection.connect_selection_changed(move |_, _, _| {
+    let bitset = facet_selection_for_handler.selection();
+    if let Some((iter, first_pos)) = gtk::BitsetIter::init_first(&bitset) {
+      playlist_store_for_handler.remove_all();
+
+      let item = get_selection(&facet_selection_for_handler, first_pos);
+      let facet: Ref<Facet> = item.borrow();
+      let matching = tracks_for_handler.iter().filter(|t| {
+        get_album_artist_or_artist(t) == facet.album_artist_or_artist && t.album == facet.album
+      });
+      load_playlist_store(matching, &playlist_store_for_handler);
+
+      for pos in iter {
+        let item = get_selection(&facet_selection_for_handler, pos);
+        let facet: Ref<Facet> = item.borrow();
+        let matching = tracks_for_handler.iter().filter(|t| {
+          get_album_artist_or_artist(t) == facet.album_artist_or_artist && t.album == facet.album
         });
-
-        load_playlist_store(con, &playlist_store_rc1);
-
-        for pos in iter {
-          let item = get_selection(&facet_sel_rc1, pos);
-          let r: Ref<Facet> = item.borrow();
-          let con = tracks_rc.iter().filter(|x| {
-            get_album_artist_or_artist(x) == r.album_artist_or_artist && x.album == r.album
-          });
-
-          load_playlist_store(con, &playlist_store_rc1);
-        }
+        load_playlist_store(matching, &playlist_store_for_handler);
       }
-      None => { /* empty selection */ }
     }
   });
 
@@ -113,11 +108,11 @@ pub fn create_facet_box(
       let k: Ref<Facet> = r.borrow();
       let k0 = k.all;
       let k1 = match &k.album {
-        Some(s) => re.is_match(&s),
+        Some(s) => re.is_match(s),
         None => false,
       };
       let k2 = match &k.album_artist_or_artist {
-        Some(s) => re.is_match(&s),
+        Some(s) => re.is_match(s),
         None => false,
       };
       k0 || k1 || k2

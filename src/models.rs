@@ -2,7 +2,8 @@ use crate::schema::{recently_played, tracks};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
-#[derive(Queryable)]
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::tracks)]
 pub struct Track {
   pub filename: String,
   pub artist: Option<String>,

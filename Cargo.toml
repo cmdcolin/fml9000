@@ -7,11 +7,11 @@ license = "MIT"
 [dependencies]
 diesel = { version = "2.1", features = ["sqlite", "chrono", "uuid"] }
 diesel_migrations = { version = "2.1", features = ["sqlite"] }
-directories = "5.0"
+directories = "6"
 chrono = "0.4"
 gtk = { version = "0.9", package = "gtk4", features = ["v4_16"] }
 lofty = "0"
-notify = "7"
+notify = "8"
 regex = "1"
 rodio = "0.20"
 serde_derive = "1"

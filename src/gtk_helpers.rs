@@ -5,12 +5,14 @@ use gtk::gdk;
 use gtk::glib::{BoxedAnyObject, Bytes, Object};
 use gtk::{Button, Image, ListItem, MultiSelection, SelectionModel};
 
-pub fn str_or_unknown(str: &Option<String>) -> String {
-  str.as_ref().unwrap_or(&"(Unknown)".to_string()).to_string()
+const UNKNOWN: &str = "(Unknown)";
+
+pub fn str_or_unknown(s: &Option<String>) -> String {
+  s.as_deref().unwrap_or(UNKNOWN).to_string()
 }
 
 pub fn get_album_artist_or_artist(track: &Track) -> Option<String> {
-  return track.album_artist.clone().or(track.artist.clone());
+  track.album_artist.clone().or_else(|| track.artist.clone())
 }
 
 pub fn setup_col(item: &Object) {
@@ -35,15 +37,10 @@ pub fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedA
   sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
 }
 
-pub fn load_img(a: &'static [u8]) -> Image {
-  let loader = gdk::gdk_pixbuf::PixbufLoader::with_type("svg").unwrap();
-  loader.write(&a).unwrap();
-  loader.close().unwrap();
-
-  let bytes = Bytes::from_static(&a);
-  let logo = gdk::Texture::from_bytes(&bytes).unwrap();
-  let img = Image::builder().paintable(&logo).build();
-  img
+pub fn load_img(svg_data: &'static [u8]) -> Image {
+  let bytes = Bytes::from_static(svg_data);
+  let texture = gdk::Texture::from_bytes(&bytes).unwrap();
+  Image::builder().paintable(&texture).build()
 }
 
 pub fn create_button(img: &Image) -> Button {
