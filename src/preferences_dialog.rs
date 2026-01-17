@@ -2,7 +2,7 @@ use crate::playback_controller::PlaybackController;
 use crate::settings::{write_settings, FmlSettings, RowHeight};
 use adw::prelude::*;
 use fml9000::models::Track;
-use fml9000::{run_scan_with_progress, ScanProgress};
+use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan_with_progress, ScanProgress};
 use gtk::gio;
 use gtk::gio::ListStore;
 use gtk::glib;
@@ -282,6 +282,8 @@ pub async fn dialog(
   let settings_for_rescan = Rc::clone(&settings);
   let tracks_for_rescan = Rc::clone(&tracks);
   let prefs_window_for_rescan = preferences_window.clone();
+  let playlist_store_for_rescan = playlist_store.clone();
+  let facet_store_for_rescan = facet_store.clone();
   rescan_button.connect_clicked(move |btn| {
     btn.set_sensitive(false);
 
@@ -361,6 +363,8 @@ pub async fn dialog(
     let status_label_clone = status_label.clone();
     let progress_bar_clone = progress_bar.clone();
     let file_label_clone = file_label.clone();
+    let playlist_store_clone = playlist_store_for_rescan.clone();
+    let facet_store_clone = facet_store_for_rescan.clone();
 
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
       while let Ok(progress) = rx.try_recv() {
@@ -400,6 +404,14 @@ pub async fn dialog(
             progress_bar_clone.set_fraction(1.0);
             progress_bar_clone.set_text(Some("Complete"));
             file_label_clone.set_label("");
+
+            // Reload tracks and stores from database
+            if let Ok(fresh_tracks) = load_tracks() {
+              playlist_store_clone.remove_all();
+              load_playlist_store(fresh_tracks.iter(), &playlist_store_clone);
+              facet_store_clone.remove_all();
+              load_facet_store(&fresh_tracks, &facet_store_clone);
+            }
 
             // Close dialog after a short delay
             let dialog = dialog_clone.clone();

@@ -167,6 +167,10 @@ impl MpvPlayer {
     self.send_command(vec!["cycle".into(), "pause".into()]);
   }
 
+  pub fn set_volume(&self, volume: f64) {
+    self.send_command(vec!["set_property".into(), "volume".into(), volume.into()]);
+  }
+
   pub fn play_audio(&self, video_id: &str) {
     self.play(video_id, true);
   }

@@ -167,6 +167,3 @@ fn extract_handle(url: &str) -> Option<String> {
   }
 }
 
-pub fn get_video_url(video_id: &str) -> String {
-  format!("https://www.youtube.com/watch?v={video_id}")
-}

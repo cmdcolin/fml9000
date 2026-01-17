@@ -16,7 +16,7 @@ mod youtube_add_dialog;
 use adw::prelude::*;
 use adw::Application;
 use facet_box::create_facet_box;
-use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan_folders};
+use fml9000::{load_facet_store, load_playlist_store, load_tracks};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::gdk::Key;
@@ -207,7 +207,11 @@ fn app_main(application: &Application) {
 
   if settings.borrow().rescan_on_startup {
     let folders = settings.borrow().folders.clone();
-    run_scan_folders(&folders, &tracks);
+    let existing_files: std::collections::HashSet<String> = tracks.iter().map(|t| t.filename.clone()).collect();
+    std::thread::spawn(move || {
+      let (tx, _rx) = std::sync::mpsc::channel();
+      fml9000::run_scan_with_progress(folders, existing_files, std::collections::HashSet::new(), tx);
+    });
   }
 
   let filter = CustomFilter::new(|_| true);

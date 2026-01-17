@@ -27,7 +27,7 @@ pub enum PlaybackSource {
 }
 
 #[derive(Clone)]
-pub enum PlayableItem {
+enum PlayableItem {
   LocalTrack(Rc<Track>),
   YouTubeVideo(Rc<YouTubeVideo>),
 }
@@ -66,10 +66,6 @@ impl PlaybackController {
 
   pub fn window(&self) -> &Rc<ApplicationWindow> {
     &self.window
-  }
-
-  pub fn current_index(&self) -> Option<u32> {
-    self.current_index.get()
   }
 
   pub fn playlist_len(&self) -> u32 {

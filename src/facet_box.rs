@@ -64,18 +64,36 @@ pub fn create_facet_box(
     if let Some((iter, first_pos)) = gtk::BitsetIter::init_first(&bitset) {
       playlist_store_for_handler.remove_all();
 
+      // Collect all selected facets and check for "(All)"
+      let mut selected_facets = Vec::new();
+      let mut has_all = false;
+
       let item = get_selection(&facet_selection_for_handler, first_pos);
       let facet: Ref<Facet> = item.borrow();
-      let matching = tracks_for_handler.iter().filter(|t| {
-        get_album_artist_or_artist(t) == facet.album_artist_or_artist && t.album == facet.album
-      });
-      load_playlist_store(matching, &playlist_store_for_handler);
+      if facet.all {
+        has_all = true;
+      } else {
+        selected_facets.push((facet.album_artist_or_artist.clone(), facet.album.clone()));
+      }
+      drop(facet);
 
       for pos in iter {
         let item = get_selection(&facet_selection_for_handler, pos);
         let facet: Ref<Facet> = item.borrow();
+        if facet.all {
+          has_all = true;
+        } else {
+          selected_facets.push((facet.album_artist_or_artist.clone(), facet.album.clone()));
+        }
+      }
+
+      if has_all {
+        load_playlist_store(tracks_for_handler.iter(), &playlist_store_for_handler);
+      } else {
         let matching = tracks_for_handler.iter().filter(|t| {
-          get_album_artist_or_artist(t) == facet.album_artist_or_artist && t.album == facet.album
+          selected_facets.iter().any(|(artist, album)| {
+            get_album_artist_or_artist(t) == *artist && t.album == *album
+          })
         });
         load_playlist_store(matching, &playlist_store_for_handler);
       }

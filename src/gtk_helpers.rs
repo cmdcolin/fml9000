@@ -1,9 +1,8 @@
 use crate::grid_cell::GridCell;
 use adw::prelude::*;
 use fml9000::models::Track;
-use gtk::gdk;
-use gtk::glib::{BoxedAnyObject, Bytes, Object};
-use gtk::{Button, Image, ListItem, MultiSelection, SelectionModel};
+use gtk::glib::{BoxedAnyObject, Object};
+use gtk::{ListItem, MultiSelection};
 
 const UNKNOWN: &str = "(Unknown)";
 
@@ -33,18 +32,3 @@ pub fn get_selection(sel: &MultiSelection, pos: u32) -> BoxedAnyObject {
   sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
 }
 
-pub fn get_playlist_activate_selection(sel: &SelectionModel, pos: u32) -> BoxedAnyObject {
-  sel.item(pos).unwrap().downcast::<BoxedAnyObject>().unwrap()
-}
-
-pub fn load_img(svg_data: &'static [u8]) -> Image {
-  let bytes = Bytes::from_static(svg_data);
-  let texture = gdk::Texture::from_bytes(&bytes).unwrap();
-  Image::builder().paintable(&texture).build()
-}
-
-pub fn create_button(img: &Image) -> Button {
-  let button = Button::builder().child(img).build();
-  button.add_css_class("flat");
-  button
-}

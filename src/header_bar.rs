@@ -176,6 +176,13 @@ pub fn create_header_bar(
             }
           }
         }
+
+        if was_playing_for_timer.get() && !pc_for_timer.mpv().is_playing() {
+          was_playing_for_timer.set(false);
+          pc_for_timer.play_next();
+        } else if pc_for_timer.mpv().is_playing() {
+          was_playing_for_timer.set(true);
+        }
       }
       PlaybackSource::None => {}
     }
@@ -197,6 +204,9 @@ pub fn create_header_bar(
   let settings_for_volume = Rc::clone(&settings);
   volume_button.connect_value_changed(move |_, volume| {
     pc_for_volume.audio().set_volume(volume as f32);
+    if pc_for_volume.playback_source() == PlaybackSource::YouTube {
+      pc_for_volume.mpv().set_volume(volume * 100.0);
+    }
     let mut s = settings_for_volume.borrow_mut();
     s.volume = volume;
     if let Err(e) = crate::settings::write_settings(&s) {
