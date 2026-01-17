@@ -1,13 +1,16 @@
 use gtk::gio;
+use gtk::glib;
 use gtk::prelude::*;
-use gtk::{MediaFile, Video};
+use gtk::{Align, Box as GtkBox, Label, MediaFile, Orientation, Spinner, Stack, Video};
 use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
 use std::time::Duration;
 
 pub struct VideoWidget {
+    stack: Stack,
     video: Video,
+    spinner: Spinner,
     video_active: Cell<bool>,
     current_url: RefCell<Option<String>>,
 }
@@ -19,15 +22,49 @@ impl VideoWidget {
         video.set_vexpand(true);
         video.set_autoplay(true);
 
+        // Create loading view with spinner
+        let loading_box = GtkBox::new(Orientation::Vertical, 12);
+        loading_box.set_halign(Align::Center);
+        loading_box.set_valign(Align::Center);
+
+        let spinner = Spinner::new();
+        spinner.set_size_request(48, 48);
+
+        let loading_label = Label::new(Some("Loading video..."));
+        loading_label.add_css_class("dim-label");
+
+        loading_box.append(&spinner);
+        loading_box.append(&loading_label);
+
+        // Create stack to switch between loading and video
+        let stack = Stack::new();
+        stack.set_hexpand(true);
+        stack.set_vexpand(true);
+        stack.add_named(&loading_box, Some("loading"));
+        stack.add_named(&video, Some("video"));
+        stack.set_visible_child_name("video");
+
         Rc::new(Self {
+            stack,
             video,
+            spinner,
             video_active: Cell::new(false),
             current_url: RefCell::new(None),
         })
     }
 
-    pub fn widget(&self) -> &Video {
-        &self.video
+    pub fn widget(&self) -> &Stack {
+        &self.stack
+    }
+
+    fn show_loading(&self) {
+        self.spinner.start();
+        self.stack.set_visible_child_name("loading");
+    }
+
+    fn show_video(&self) {
+        self.spinner.stop();
+        self.stack.set_visible_child_name("video");
     }
 
     pub fn play(&self, url: &str) {
@@ -43,47 +80,75 @@ impl VideoWidget {
             self.video.set_filename(Some(url));
         }
 
+        self.show_video();
         self.video_active.set(true);
         *self.current_url.borrow_mut() = Some(url.to_string());
     }
 
-    pub fn play_youtube(&self, video_id: &str) {
+    pub fn play_youtube(self: &Rc<Self>, video_id: &str) {
         eprintln!("VideoWidget::play_youtube() with video_id: {video_id}");
 
-        // Use yt-dlp to get the actual stream URL
-        let url = format!("https://www.youtube.com/watch?v={video_id}");
+        // Show loading state
+        self.show_loading();
 
-        // Try to get a direct video+audio URL (not a manifest)
-        // Using format 18 which is usually a direct mp4 with video+audio
-        match Command::new("yt-dlp")
-            .args([
-                "-f", "18/22/best[ext=mp4]/best",  // Prefer direct mp4 formats
-                "-g",  // Get URL only
-                &url
-            ])
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    let stream_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let url = format!("https://www.youtube.com/watch?v={video_id}");
+        let widget = Rc::clone(self);
+
+        // Use std channel + glib timeout to poll for result
+        let (sender, receiver) = std::sync::mpsc::channel::<Result<String, String>>();
+
+        std::thread::spawn(move || {
+            let result = Command::new("yt-dlp")
+                .args([
+                    "-f", "18/22/best[ext=mp4]/best",
+                    "-g",
+                    &url
+                ])
+                .output();
+
+            let message = match result {
+                Ok(output) => {
+                    if output.status.success() {
+                        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                    } else {
+                        Err(String::from_utf8_lossy(&output.stderr).to_string())
+                    }
+                }
+                Err(e) => Err(format!("Failed to run yt-dlp: {e}")),
+            };
+            let _ = sender.send(message);
+        });
+
+        // Poll for result from main thread
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            match receiver.try_recv() {
+                Ok(Ok(stream_url)) => {
                     eprintln!("Got stream URL: {}", &stream_url[..stream_url.len().min(100)]);
-                    self.play(&stream_url);
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("yt-dlp failed: {stderr}");
+                    widget.play(&stream_url);
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(e)) => {
+                    eprintln!("yt-dlp error: {e}");
+                    widget.show_video();
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    glib::ControlFlow::Continue
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("yt-dlp channel disconnected");
+                    widget.show_video();
+                    glib::ControlFlow::Break
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to run yt-dlp: {e}");
-            }
-        }
+        });
     }
 
     pub fn stop(&self) {
-        // Clear the media file to stop playback
         self.video.set_filename(None::<&str>);
         self.video_active.set(false);
         *self.current_url.borrow_mut() = None;
+        self.show_video();
     }
 
     pub fn pause(&self) {
@@ -157,7 +222,9 @@ impl Default for VideoWidget {
     fn default() -> Self {
         // This shouldn't be used directly, use new() instead
         Self {
+            stack: Stack::new(),
             video: Video::new(),
+            spinner: Spinner::new(),
             video_active: Cell::new(false),
             current_url: RefCell::new(None),
         }
