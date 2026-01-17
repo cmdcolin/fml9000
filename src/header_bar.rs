@@ -150,6 +150,8 @@ pub fn create_header_bar(
   let was_playing_for_timer = Rc::clone(&was_playing);
   let time_current_for_timer = time_current.clone();
   let time_total_for_timer = time_total.clone();
+  let play_btn_for_timer = play_btn.clone();
+  let pause_btn_for_timer = pause_btn.clone();
   let last_playback_source: Rc<Cell<PlaybackSource>> = Rc::new(Cell::new(PlaybackSource::None));
   glib::timeout_add_local(Duration::from_millis(250), move || {
     let current_source = pc_for_timer.playback_source();
@@ -160,6 +162,23 @@ pub fn create_header_bar(
       seek_adjustment_for_timer.set_value(0.0);
       time_current_for_timer.set_label("0:00");
       time_total_for_timer.set_label("0:00");
+    }
+
+    // Update play/pause button backgrounds based on state
+    let is_playing = match current_source {
+      PlaybackSource::Local => pc_for_timer.audio().is_playing(),
+      PlaybackSource::YouTube => pc_for_timer.video_widget().is_playing(),
+      PlaybackSource::None => false,
+    };
+    if is_playing {
+      play_btn_for_timer.add_css_class("suggested-action");
+      pause_btn_for_timer.remove_css_class("suggested-action");
+    } else if current_source != PlaybackSource::None {
+      play_btn_for_timer.remove_css_class("suggested-action");
+      pause_btn_for_timer.add_css_class("suggested-action");
+    } else {
+      play_btn_for_timer.remove_css_class("suggested-action");
+      pause_btn_for_timer.remove_css_class("suggested-action");
     }
 
     match current_source {

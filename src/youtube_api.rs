@@ -20,14 +20,23 @@ struct ResourceId {
 }
 
 #[derive(Debug, Deserialize)]
+struct Thumbnail {
+  url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Thumbnails {
+  medium: Option<Thumbnail>,
+}
+
+#[derive(Debug, Deserialize)]
 struct Snippet {
   #[serde(rename = "resourceId")]
   resource_id: ResourceId,
   title: String,
   #[serde(rename = "publishedAt")]
   published_at: Option<String>,
-  #[serde(rename = "videoOwnerChannelTitle")]
-  video_owner_channel_title: Option<String>,
+  thumbnails: Option<Thumbnails>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +58,7 @@ pub struct ApiVideoInfo {
   pub video_id: String,
   pub title: String,
   pub published_at: Option<NaiveDateTime>,
+  pub thumbnail_url: Option<String>,
 }
 
 pub fn get_playlist_id_for_handle(handle: &str) -> Result<String, String> {
@@ -106,10 +116,17 @@ pub fn fetch_new_videos(
           .ok()
       });
 
+      let thumbnail_url = item
+        .snippet
+        .thumbnails
+        .and_then(|t| t.medium)
+        .map(|t| t.url);
+
       all_videos.push(ApiVideoInfo {
         video_id,
         title: item.snippet.title,
         published_at,
+        thumbnail_url,
       });
     }
 

@@ -632,7 +632,7 @@ pub async fn dialog(
         if new_count > 0 {
           let video_tuples: Vec<_> = new_videos
             .iter()
-            .map(|v| (v.video_id.clone(), v.title.clone(), None, None, v.published_at))
+            .map(|v| (v.video_id.clone(), v.title.clone(), None, v.thumbnail_url.clone(), v.published_at))
             .collect();
           let _ = add_youtube_videos(*channel_id, &video_tuples);
           total_new_videos += new_count;
