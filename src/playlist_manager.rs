@@ -50,6 +50,8 @@ pub fn create_playlist_manager(
   let playback_controller_for_setup = playback_controller.clone();
   let playlist_mgr_store_for_setup = playlist_mgr_store.clone();
   let selection_for_setup = selection.clone();
+  let main_store_for_setup = main_playlist_store.clone();
+  let current_playlist_id_for_setup = current_playlist_id.clone();
   factory.connect_setup(move |_factory, item| {
     setup_col(item);
 
@@ -79,6 +81,8 @@ pub fn create_playlist_manager(
       let child_for_drop = child.clone();
       let sel = selection_for_setup.clone();
       let store_for_select = playlist_mgr_store_for_setup.clone();
+      let main_store_for_drop = main_store_for_setup.clone();
+      let current_pid_for_drop = current_playlist_id_for_setup.clone();
       drop_target.connect_drop(move |_target, value, _x, _y| {
         child_for_drop.remove_css_class("drop-target-hover");
 
@@ -96,6 +100,12 @@ pub fn create_playlist_manager(
                 if let PlaylistType::UserPlaylist(id, _) = &playlist.playlist_type {
                   if *id == playlist_id {
                     sel.set_selected(i);
+                    // Set current playlist ID and reload contents to show newly added items
+                    *current_pid_for_drop.borrow_mut() = Some(playlist_id);
+                    main_store_for_drop.remove_all();
+                    if let Ok(items) = get_playlist_items(playlist_id) {
+                      load_user_playlist_items(&items, &main_store_for_drop);
+                    }
                     break;
                   }
                 }
@@ -244,7 +254,7 @@ pub fn create_playlist_manager(
   let popover = playlist_popover.clone();
   let sel_for_gesture = selection.clone();
   let store_for_gesture = playlist_mgr_store.clone();
-  gesture.connect_released(move |gesture, _n_press, x, y| {
+  gesture.connect_pressed(move |gesture, _n_press, x, y| {
     let mut found_playlist: Option<(i32, String)> = None;
 
     if let Some(selected_item) = sel_for_gesture.selected_item() {

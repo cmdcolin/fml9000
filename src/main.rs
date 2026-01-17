@@ -23,7 +23,7 @@ use gtk::gdk::Key;
 use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Orientation, Paned, Picture, Stack};
 use video_widget::VideoWidget;
 use header_bar::create_header_bar;
-use playback_controller::PlaybackController;
+use playback_controller::{PlaybackController, PlaybackSource};
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
 use rodio::{OutputStream, Sink};
@@ -182,6 +182,20 @@ fn main() {
 fn app_main(application: &Application) {
   load_css::load_css();
 
+  // Add local img directory to icon search path for dev mode
+  let icon_theme = gtk::IconTheme::for_display(&gtk::gdk::Display::default().unwrap());
+  if let Ok(exe_path) = std::env::current_exe() {
+    if let Some(exe_dir) = exe_path.parent() {
+      // Check for img dir relative to executable (release) or in current dir (dev)
+      for base in [exe_dir.to_path_buf(), std::env::current_dir().unwrap_or_default()] {
+        let img_dir = base.join("img");
+        if img_dir.exists() {
+          icon_theme.add_search_path(&img_dir);
+        }
+      }
+    }
+  }
+
   let settings = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   let window = Rc::new(
@@ -190,6 +204,7 @@ fn app_main(application: &Application) {
       .default_height(settings.borrow().window_height)
       .application(application)
       .title("fml9000")
+      .icon_name("fml9000")
       .build(),
   );
 
@@ -249,6 +264,7 @@ fn app_main(application: &Application) {
     Rc::clone(&media_stack),
     Rc::clone(&window),
     settings.borrow().shuffle_enabled,
+    settings.borrow().repeat_mode,
   );
 
   let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
@@ -338,10 +354,22 @@ fn app_main(application: &Application) {
   key_controller.connect_key_pressed(move |_, key, _, _| {
     match key {
       Key::space => {
-        if pc_for_keys.audio().is_playing() {
-          pc_for_keys.audio().pause();
-        } else {
-          pc_for_keys.audio().play();
+        match pc_for_keys.playback_source() {
+          PlaybackSource::Local => {
+            if pc_for_keys.audio().is_playing() {
+              pc_for_keys.audio().pause();
+            } else {
+              pc_for_keys.audio().play();
+            }
+          }
+          PlaybackSource::YouTube => {
+            if pc_for_keys.video_widget().is_playing() {
+              pc_for_keys.video_widget().pause();
+            } else {
+              pc_for_keys.video_widget().unpause();
+            }
+          }
+          PlaybackSource::None => {}
         }
         gtk::glib::Propagation::Stop
       }

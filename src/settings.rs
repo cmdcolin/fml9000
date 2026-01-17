@@ -54,6 +54,15 @@ pub enum RowHeight {
   UltraCompact,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RepeatMode {
+  #[default]
+  Off,
+  All,
+  One,
+}
+
 impl RowHeight {
   pub fn height_pixels(&self) -> i32 {
     match self {
@@ -84,6 +93,8 @@ pub struct FmlSettings {
   pub row_height: RowHeight,
   #[serde(default)]
   pub shuffle_enabled: bool,
+  #[serde(default)]
+  pub repeat_mode: RepeatMode,
   #[serde(default = "default_window_width")]
   pub window_width: i32,
   #[serde(default = "default_window_height")]
@@ -106,6 +117,7 @@ impl Default for FmlSettings {
       youtube_fetch_limit: 100,
       row_height: RowHeight::Normal,
       shuffle_enabled: false,
+      repeat_mode: RepeatMode::Off,
       window_width: 1200,
       window_height: 600,
       main_pane_position: -1,

@@ -5,3 +5,4 @@ Icon=fml9000
 Type=Application
 Categories=Audio;Music;Player;AudioVideo;
 Comment=Music player
+StartupWMClass=com.github.fml9000

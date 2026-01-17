@@ -1,4 +1,5 @@
 use crate::gtk_helpers::str_or_unknown;
+use crate::settings::RepeatMode;
 use crate::video_widget::VideoWidget;
 use crate::AudioPlayer;
 use fml9000::{
@@ -51,6 +52,7 @@ pub struct PlaybackController {
   current_index: Cell<Option<u32>>,
   playback_source: Cell<PlaybackSource>,
   shuffle_enabled: Cell<bool>,
+  repeat_mode: Cell<RepeatMode>,
   album_art: Rc<Picture>,
   window: Rc<ApplicationWindow>,
   play_stats: RefCell<CurrentPlayStats>,
@@ -65,6 +67,7 @@ impl PlaybackController {
     media_stack: Rc<Stack>,
     window: Rc<ApplicationWindow>,
     shuffle_enabled: bool,
+    repeat_mode: RepeatMode,
   ) -> Rc<Self> {
     Rc::new(Self {
       audio,
@@ -74,6 +77,7 @@ impl PlaybackController {
       current_index: Cell::new(None),
       playback_source: Cell::new(PlaybackSource::None),
       shuffle_enabled: Cell::new(shuffle_enabled),
+      repeat_mode: Cell::new(repeat_mode),
       album_art,
       window,
       play_stats: RefCell::new(CurrentPlayStats::None),
@@ -342,22 +346,63 @@ impl PlaybackController {
     self.shuffle_enabled.set(enabled);
   }
 
+  pub fn repeat_mode(&self) -> RepeatMode {
+    self.repeat_mode.get()
+  }
+
+  pub fn set_repeat_mode(&self, mode: RepeatMode) {
+    self.repeat_mode.set(mode);
+  }
+
+  pub fn cycle_repeat_mode(&self) -> RepeatMode {
+    let next = match self.repeat_mode.get() {
+      RepeatMode::Off => RepeatMode::All,
+      RepeatMode::All => RepeatMode::One,
+      RepeatMode::One => RepeatMode::Off,
+    };
+    self.repeat_mode.set(next);
+    next
+  }
+
+  pub fn current_index(&self) -> Option<u32> {
+    self.current_index.get()
+  }
+
   pub fn play_next(&self) -> bool {
     let len = self.playlist_len();
     if len == 0 {
       return false;
     }
 
+    // Repeat One: replay the same track
+    if self.repeat_mode.get() == RepeatMode::One {
+      if let Some(idx) = self.current_index.get() {
+        return self.play_index(idx);
+      }
+    }
+
     let next_index = if self.shuffle_enabled.get() {
+      // Shuffle: pick random, but avoid same track if possible
       let mut rng = rand::thread_rng();
-      rng.gen_range(0..len)
+      if len == 1 {
+        0
+      } else {
+        loop {
+          let idx = rng.gen_range(0..len);
+          if Some(idx) != self.current_index.get() {
+            break idx;
+          }
+        }
+      }
     } else {
       match self.current_index.get() {
         Some(idx) => {
           if idx + 1 < len {
             idx + 1
+          } else if self.repeat_mode.get() == RepeatMode::All {
+            0 // Wrap around
           } else {
-            0
+            return false; // Stop at end when repeat is off
           }
         }
         None => 0,

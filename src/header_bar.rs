@@ -1,5 +1,5 @@
 use crate::playback_controller::{PlaybackController, PlaybackSource};
-use crate::settings::FmlSettings;
+use crate::settings::{FmlSettings, RepeatMode};
 use adw::prelude::*;
 use fml9000::models::Track;
 use gtk::glib::{self, ControlFlow, MainContext};
@@ -13,6 +13,22 @@ fn format_time(duration: Duration) -> String {
   let mins = total_secs / 60;
   let secs = total_secs % 60;
   format!("{mins}:{secs:02}")
+}
+
+fn repeat_mode_icon(mode: RepeatMode) -> &'static str {
+  match mode {
+    RepeatMode::Off => "media-playlist-repeat-symbolic",
+    RepeatMode::All => "media-playlist-repeat-symbolic",
+    RepeatMode::One => "media-playlist-repeat-song-symbolic",
+  }
+}
+
+fn repeat_mode_tooltip(mode: RepeatMode) -> &'static str {
+  match mode {
+    RepeatMode::Off => "Repeat: Off",
+    RepeatMode::All => "Repeat: All",
+    RepeatMode::One => "Repeat: One",
+  }
 }
 
 pub fn create_header_bar(
@@ -32,6 +48,7 @@ pub fn create_header_bar(
   let pc_for_seek = Rc::clone(&playback_controller);
   let pc_for_timer = Rc::clone(&playback_controller);
   let pc_for_shuffle = Rc::clone(&playback_controller);
+  let pc_for_repeat = Rc::clone(&playback_controller);
 
   let prev_btn = Button::builder()
     .icon_name("media-skip-backward-symbolic")
@@ -62,6 +79,13 @@ pub fn create_header_bar(
     .css_classes(["flat"])
     .active(playback_controller.shuffle_enabled())
     .tooltip_text("Shuffle")
+    .build();
+
+  let initial_repeat_mode = playback_controller.repeat_mode();
+  let repeat_btn = Button::builder()
+    .icon_name(repeat_mode_icon(initial_repeat_mode))
+    .css_classes(if initial_repeat_mode == RepeatMode::Off { vec!["flat"] } else { vec!["flat", "repeat-active"] })
+    .tooltip_text(repeat_mode_tooltip(initial_repeat_mode))
     .build();
 
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
@@ -236,6 +260,7 @@ pub fn create_header_bar(
   button_box.append(&next_btn);
   button_box.append(&stop_btn);
   button_box.append(&shuffle_btn);
+  button_box.append(&repeat_btn);
   button_box.append(&volume_button);
 
   pause_btn.connect_clicked(move |_| {
@@ -281,6 +306,23 @@ pub fn create_header_bar(
     pc_for_shuffle.set_shuffle_enabled(enabled);
     let mut s = settings_for_shuffle.borrow_mut();
     s.shuffle_enabled = enabled;
+    if let Err(e) = crate::settings::write_settings(&s) {
+      eprintln!("Warning: {e}");
+    }
+  });
+
+  let settings_for_repeat = Rc::clone(&settings);
+  repeat_btn.connect_clicked(move |btn| {
+    let new_mode = pc_for_repeat.cycle_repeat_mode();
+    btn.set_icon_name(repeat_mode_icon(new_mode));
+    btn.set_tooltip_text(Some(repeat_mode_tooltip(new_mode)));
+    if new_mode == RepeatMode::Off {
+      btn.remove_css_class("repeat-active");
+    } else {
+      btn.add_css_class("repeat-active");
+    }
+    let mut s = settings_for_repeat.borrow_mut();
+    s.repeat_mode = new_mode;
     if let Err(e) = crate::settings::write_settings(&s) {
       eprintln!("Warning: {e}");
     }

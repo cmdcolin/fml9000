@@ -1,7 +1,7 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, setup_col, str_or_unknown};
 use crate::video_widget::open_in_browser;
-use crate::playback_controller::PlaybackController;
+use crate::playback_controller::{PlaybackController, PlaybackSource};
 use crate::settings::FmlSettings;
 use chrono::NaiveDateTime;
 use fml9000::models::{Track, YouTubeVideo};
@@ -9,13 +9,13 @@ use fml9000::{
   get_playlist_items, reorder_playlist_items, remove_track_from_playlist,
   remove_video_from_playlist, PlaylistItemIdentifier, UserPlaylistItem,
 };
-use gtk::gdk;
+use gtk::gdk::{self, Key};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  ColumnView, ColumnViewColumn, CustomSorter, DragSource, DropTarget, GestureClick, MultiSelection,
-  PopoverMenu, ScrolledWindow, SignalListItemFactory, SortListModel,
+  ColumnView, ColumnViewColumn, CustomSorter, DragSource, DropTarget, EventControllerKey,
+  GestureClick, MultiSelection, PopoverMenu, ScrolledWindow, SignalListItemFactory, SortListModel,
 };
 use std::cell::RefCell;
 use std::path::Path;
@@ -522,6 +522,47 @@ pub fn create_playlist_view(
   });
   playlist_columnview.add_controller(drop_target);
 
+  let pc_for_keys = playback_controller.clone();
+  let key_controller = EventControllerKey::new();
+  key_controller.connect_key_pressed(move |_, key, _, _| {
+    match key {
+      Key::space => {
+        match pc_for_keys.playback_source() {
+          PlaybackSource::Local => {
+            if pc_for_keys.audio().is_playing() {
+              pc_for_keys.audio().pause();
+            } else {
+              pc_for_keys.audio().play();
+            }
+          }
+          PlaybackSource::YouTube => {
+            if pc_for_keys.video_widget().is_playing() {
+              pc_for_keys.video_widget().pause();
+            } else {
+              pc_for_keys.video_widget().unpause();
+            }
+          }
+          PlaybackSource::None => {}
+        }
+        gtk::glib::Propagation::Stop
+      }
+      Key::n | Key::N => {
+        pc_for_keys.play_next();
+        gtk::glib::Propagation::Stop
+      }
+      Key::p | Key::P => {
+        pc_for_keys.play_prev();
+        gtk::glib::Propagation::Stop
+      }
+      Key::s | Key::S => {
+        pc_for_keys.stop();
+        gtk::glib::Propagation::Stop
+      }
+      _ => gtk::glib::Propagation::Proceed,
+    }
+  });
+  playlist_columnview.add_controller(key_controller);
+
   let pc_for_activate = playback_controller.clone();
   let store_for_activate = playlist_store.clone();
   let settings_for_activate = settings.clone();
@@ -666,27 +707,15 @@ pub fn create_playlist_view(
   let store = playlist_store.clone();
   let sel_for_gesture = playlist_sel.clone();
   let colview_for_gesture = playlist_columnview.clone();
-  gesture.connect_released(move |gesture, _n_press, x, y| {
+  gesture.connect_pressed(move |gesture, _n_press, x, y| {
     colview_for_gesture.grab_focus();
 
     let mut found_pos: Option<u32> = None;
     if let Some(picked) = colview_for_gesture.pick(x, y, gtk::PickFlags::DEFAULT) {
       let mut widget = Some(picked);
       while let Some(w) = widget {
-        if let Some(row_y) = w.compute_point(&colview_for_gesture, &gtk::graphene::Point::new(0.0, 0.0)) {
-          let height = w.height();
-          if height > 0 && height < 100 {
-            let widget_top = row_y.y();
-            for i in 0..store.n_items() {
-              let expected_top = 24.0 + (i as f32 * height as f32);
-              if (widget_top - expected_top).abs() < 5.0 {
-                found_pos = Some(i);
-                break;
-              }
-            }
-          }
-        }
-        if found_pos.is_some() {
+        if w.type_().name() == "GtkColumnViewRow" {
+          found_pos = Some(w.property::<u32>("position"));
           break;
         }
         widget = w.parent();

@@ -3,7 +3,7 @@ script:
   - mkdir -p AppDir/usr/bin
   - cp target/release/fml9000 AppDir/usr/bin/
   - mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
-  - cp img/icon.svg AppDir/usr/share/icons/hicolor/scalable/apps/fml9000.svg
+  - cp img/hicolor/scalable/apps/fml9000.svg AppDir/usr/share/icons/hicolor/scalable/apps/fml9000.svg
 
 AppDir:
   path: ./AppDir
