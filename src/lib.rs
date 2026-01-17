@@ -273,6 +273,20 @@ pub fn update_track_play_stats(path: &str) {
     .execute(&mut conn);
 }
 
+pub fn update_video_play_stats(video_id: i32) {
+  use self::schema::youtube_videos::dsl;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+  let _ = diesel::update(dsl::youtube_videos.filter(dsl::id.eq(video_id)))
+    .set((
+      dsl::play_count.eq(dsl::play_count + 1),
+      dsl::last_played.eq(diesel::dsl::now),
+    ))
+    .execute(&mut conn);
+}
+
 pub fn load_recently_played(limit: i64) -> Vec<Rc<Track>> {
   use self::schema::recently_played::dsl as rp;
   use self::schema::tracks::dsl as t;
@@ -302,6 +316,30 @@ pub fn load_tracks() -> Result<Vec<Rc<Track>>, String> {
     .load::<Track>(&mut conn)
     .map(|v| v.into_iter().map(Rc::new).collect())
     .map_err(|e| format!("Error loading tracks: {e}"))
+}
+
+pub fn load_track_by_filename(path: &str) -> Option<Rc<Track>> {
+  use self::schema::tracks::dsl::*;
+
+  let mut conn = connect_db().ok()?;
+
+  tracks
+    .filter(filename.eq(path))
+    .first::<Track>(&mut conn)
+    .ok()
+    .map(Rc::new)
+}
+
+pub fn load_video_by_id(vid_id: i32) -> Option<Rc<models::YouTubeVideo>> {
+  use self::schema::youtube_videos;
+
+  let mut conn = connect_db().ok()?;
+
+  youtube_videos::table
+    .filter(youtube_videos::id.eq(vid_id))
+    .first::<models::YouTubeVideo>(&mut conn)
+    .ok()
+    .map(Rc::new)
 }
 
 pub fn load_playlist_store<'a, I>(vals: I, store: &gio::ListStore)

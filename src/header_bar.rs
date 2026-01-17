@@ -3,7 +3,7 @@ use crate::settings::FmlSettings;
 use adw::prelude::*;
 use fml9000::models::Track;
 use gtk::glib::{self, ControlFlow, MainContext};
-use gtk::{Adjustment, Button, Label, Orientation, Scale, ScaleButton};
+use gtk::{Adjustment, Button, Label, Orientation, Scale, ScaleButton, ToggleButton};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -31,6 +31,7 @@ pub fn create_header_bar(
   let pc_for_next = Rc::clone(&playback_controller);
   let pc_for_seek = Rc::clone(&playback_controller);
   let pc_for_timer = Rc::clone(&playback_controller);
+  let pc_for_shuffle = Rc::clone(&playback_controller);
 
   let prev_btn = Button::builder()
     .icon_name("media-skip-backward-symbolic")
@@ -55,6 +56,12 @@ pub fn create_header_bar(
   let settings_btn = Button::builder()
     .icon_name("emblem-system-symbolic")
     .css_classes(["flat"])
+    .build();
+  let shuffle_btn = ToggleButton::builder()
+    .icon_name("media-playlist-shuffle-symbolic")
+    .css_classes(["flat"])
+    .active(playback_controller.shuffle_enabled())
+    .tooltip_text("Shuffle")
     .build();
 
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
@@ -139,6 +146,8 @@ pub fn create_header_bar(
             let pos = pc_for_timer.audio().get_pos();
             let pos_secs = pos.as_secs_f64();
 
+            pc_for_timer.check_play_threshold(pos_secs);
+
             if !is_seeking_for_timer.get() {
               let fraction = (pos_secs / duration_secs).clamp(0.0, 1.0);
               seek_adjustment_for_timer.set_value(fraction);
@@ -162,6 +171,8 @@ pub fn create_header_bar(
           if duration_secs > 1.0 {
             if let Some(pos) = pc_for_timer.video_widget().get_time_pos() {
               let pos_secs = pos.as_secs_f64();
+
+              pc_for_timer.check_play_threshold(pos_secs);
 
               // Only update if position is valid (not beyond duration)
               if pos_secs >= 0.0 && pos_secs <= duration_secs {
@@ -224,6 +235,7 @@ pub fn create_header_bar(
   button_box.append(&prev_btn);
   button_box.append(&next_btn);
   button_box.append(&stop_btn);
+  button_box.append(&shuffle_btn);
   button_box.append(&volume_button);
 
   pause_btn.connect_clicked(move |_| {
@@ -261,6 +273,17 @@ pub fn create_header_bar(
 
   next_btn.connect_clicked(move |_| {
     pc_for_next.play_next();
+  });
+
+  let settings_for_shuffle = Rc::clone(&settings);
+  shuffle_btn.connect_toggled(move |btn| {
+    let enabled = btn.is_active();
+    pc_for_shuffle.set_shuffle_enabled(enabled);
+    let mut s = settings_for_shuffle.borrow_mut();
+    s.shuffle_enabled = enabled;
+    if let Err(e) = crate::settings::write_settings(&s) {
+      eprintln!("Warning: {e}");
+    }
   });
 
   let ps = playlist_store.clone();

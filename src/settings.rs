@@ -82,6 +82,8 @@ pub struct FmlSettings {
   pub youtube_fetch_limit: usize,
   #[serde(default)]
   pub row_height: RowHeight,
+  #[serde(default)]
+  pub shuffle_enabled: bool,
   #[serde(default = "default_window_width")]
   pub window_width: i32,
   #[serde(default = "default_window_height")]
@@ -103,6 +105,7 @@ impl Default for FmlSettings {
       youtube_audio_only: true,
       youtube_fetch_limit: 100,
       row_height: RowHeight::Normal,
+      shuffle_enabled: false,
       window_width: 1200,
       window_height: 600,
       main_pane_position: -1,

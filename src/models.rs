@@ -77,6 +77,8 @@ pub struct YouTubeVideo {
   pub thumbnail_url: Option<String>,
   pub published_at: Option<NaiveDateTime>,
   pub fetched_at: NaiveDateTime,
+  pub play_count: i32,
+  pub last_played: Option<NaiveDateTime>,
 }
 
 #[derive(Insertable)]

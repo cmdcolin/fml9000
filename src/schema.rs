@@ -65,6 +65,8 @@ diesel::table! {
         thumbnail_url -> Nullable<Text>,
         published_at -> Nullable<Timestamp>,
         fetched_at -> Timestamp,
+        play_count -> Integer,
+        last_played -> Nullable<Timestamp>,
     }
 }
 

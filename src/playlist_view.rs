@@ -234,12 +234,12 @@ pub fn create_playlist_view(
 
   let last_played = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => format_date(r.last_played),
-    PlaylistItem::Video(_) => String::new(),
+    PlaylistItem::Video(v) => format_date(v.last_played),
   });
 
   let last_played_sorter = create_sorter(|item| match item {
     PlaylistItem::Track(r) => format_date(r.last_played),
-    PlaylistItem::Video(_) => String::new(),
+    PlaylistItem::Video(v) => format_date(v.last_played),
   });
 
   let play_count = create_column(Rc::clone(&settings), |item| match item {
@@ -250,7 +250,13 @@ pub fn create_playlist_view(
         String::new()
       }
     }
-    PlaylistItem::Video(_) => String::new(),
+    PlaylistItem::Video(v) => {
+      if v.play_count > 0 {
+        v.play_count.to_string()
+      } else {
+        String::new()
+      }
+    }
   });
 
   let play_count_sorter = CustomSorter::new(move |obj1, obj2| {
@@ -260,7 +266,7 @@ pub fn create_playlist_view(
         .and_then(|o| try_get_item(o))
         .map(|item| match item {
           PlaylistItem::Track(r) => r.play_count,
-          PlaylistItem::Video(_) => 0,
+          PlaylistItem::Video(v) => v.play_count,
         })
         .unwrap_or(0)
     };

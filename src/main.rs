@@ -248,6 +248,7 @@ fn app_main(application: &Application) {
     Rc::clone(&video_widget),
     Rc::clone(&media_stack),
     Rc::clone(&window),
+    settings.borrow().shuffle_enabled,
   );
 
   let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));

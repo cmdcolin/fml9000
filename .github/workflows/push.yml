@@ -8,26 +8,49 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  build:
     name: Build
     runs-on: ubuntu-22.04
-    container:
-      image: ghcr.io/gtk-rs/gtk4-rs/gtk4:latest
-    strategy:
-      matrix:
-        rust:
-          - stable
-
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - name: deps
-        run: |
-          sudo apt update
-          sudo apt install --yes libasound2-dev
+      - uses: actions/checkout@v4
 
-      - name: build
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
         run: cargo build
+
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-22.04
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Build AppImage
+        uses: AppImageCrafters/build-appimage@v2.4.0
+        with:
+          recipe: ./AppImageBuilder.yml
+        env:
+          UPDATE_INFO: gh-releases-zsync|${{ github.repository_owner }}|fml9000|latest|*x86_64.AppImage.zsync
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: fml9000-appimage
+          path: '*.AppImage'

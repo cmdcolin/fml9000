@@ -1,7 +1,10 @@
 use crate::gtk_helpers::str_or_unknown;
 use crate::video_widget::VideoWidget;
 use crate::AudioPlayer;
-use fml9000::{add_track_to_recently_played, update_track_play_stats};
+use fml9000::{
+  add_track_to_recently_played, load_track_by_filename, load_video_by_id,
+  update_track_play_stats, update_video_play_stats,
+};
 use fml9000::models::{Track, YouTubeVideo};
 use gtk::gdk;
 use gtk::gio::ListStore;
@@ -10,13 +13,21 @@ use gtk::prelude::*;
 use gtk::{AlertDialog, ApplicationWindow, Picture, Stack};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
+use rand::Rng;
 use rodio::source::Source;
 use rodio::Decoder;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::rc::Rc;
+
+#[derive(Clone)]
+enum CurrentPlayStats {
+  None,
+  Track { filename: String, duration_secs: f64, counted: bool },
+  Video { id: i32, duration_secs: f64, counted: bool },
+}
 
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum PlaybackSource {
@@ -39,8 +50,10 @@ pub struct PlaybackController {
   playlist_store: ListStore,
   current_index: Cell<Option<u32>>,
   playback_source: Cell<PlaybackSource>,
+  shuffle_enabled: Cell<bool>,
   album_art: Rc<Picture>,
   window: Rc<ApplicationWindow>,
+  play_stats: RefCell<CurrentPlayStats>,
 }
 
 impl PlaybackController {
@@ -51,6 +64,7 @@ impl PlaybackController {
     video_widget: Rc<VideoWidget>,
     media_stack: Rc<Stack>,
     window: Rc<ApplicationWindow>,
+    shuffle_enabled: bool,
   ) -> Rc<Self> {
     Rc::new(Self {
       audio,
@@ -59,8 +73,10 @@ impl PlaybackController {
       playlist_store,
       current_index: Cell::new(None),
       playback_source: Cell::new(PlaybackSource::None),
+      shuffle_enabled: Cell::new(shuffle_enabled),
       album_art,
       window,
+      play_stats: RefCell::new(CurrentPlayStats::None),
     })
   }
 
@@ -155,11 +171,16 @@ impl PlaybackController {
     };
 
     let duration = source.total_duration();
+    let duration_secs = duration.map(|d| d.as_secs_f64()).unwrap_or(0.0);
     self.audio.play_source(source, duration);
     self.current_index.set(Some(index));
     self.playback_source.set(PlaybackSource::Local);
     add_track_to_recently_played(&filename);
-    update_track_play_stats(&filename);
+    *self.play_stats.borrow_mut() = CurrentPlayStats::Track {
+      filename: filename.clone(),
+      duration_secs,
+      counted: false,
+    };
 
     if !self.try_set_embedded_cover_art(&filename) {
       let mut cover_path = PathBuf::from(&filename);
@@ -210,6 +231,12 @@ impl PlaybackController {
     self.media_stack.set_visible_child_name("video");
     self.video_widget.play_youtube(&video.video_id);
 
+    *self.play_stats.borrow_mut() = CurrentPlayStats::Video {
+      id: video.id,
+      duration_secs: video.duration_seconds.map(|s| s as f64).unwrap_or(0.0),
+      counted: false,
+    };
+
     self.window.set_title(Some(&format!(
       "fml9000 // YouTube - {}",
       video.title,
@@ -224,11 +251,95 @@ impl PlaybackController {
     &self.video_widget
   }
 
+  pub fn check_play_threshold(&self, current_pos_secs: f64) {
+    let action = {
+      let mut stats = self.play_stats.borrow_mut();
+      match &mut *stats {
+        CurrentPlayStats::Track { filename, duration_secs, counted } => {
+          if !*counted && *duration_secs > 0.0 && current_pos_secs >= *duration_secs * 0.5 {
+            *counted = true;
+            let fname = filename.clone();
+            update_track_play_stats(&fname);
+            Some((Some(fname), None))
+          } else {
+            None
+          }
+        }
+        CurrentPlayStats::Video { id, duration_secs, counted } => {
+          if !*counted && *duration_secs > 0.0 && current_pos_secs >= *duration_secs * 0.5 {
+            *counted = true;
+            let vid_id = *id;
+            update_video_play_stats(vid_id);
+            Some((None, Some(vid_id)))
+          } else {
+            None
+          }
+        }
+        CurrentPlayStats::None => None,
+      }
+    };
+
+    if let Some((track_filename, video_id)) = action {
+      if let Some(fname) = track_filename {
+        self.refresh_track_in_store(&fname);
+      }
+      if let Some(vid_id) = video_id {
+        self.refresh_video_in_store(vid_id);
+      }
+    }
+  }
+
+  fn refresh_track_in_store(&self, filename: &str) {
+    if let Some(updated_track) = load_track_by_filename(filename) {
+      let n_items = self.playlist_store.n_items();
+      for i in 0..n_items {
+        if let Some(item) = self.playlist_store.item(i) {
+          if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+            if let Ok(track) = obj.try_borrow::<Rc<Track>>() {
+              if track.filename == filename {
+                self.playlist_store.remove(i);
+                self.playlist_store.insert(i, &BoxedAnyObject::new(updated_track));
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  fn refresh_video_in_store(&self, vid_id: i32) {
+    if let Some(updated_video) = load_video_by_id(vid_id) {
+      let n_items = self.playlist_store.n_items();
+      for i in 0..n_items {
+        if let Some(item) = self.playlist_store.item(i) {
+          if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+            if let Ok(video) = obj.try_borrow::<Rc<YouTubeVideo>>() {
+              if video.id == vid_id {
+                self.playlist_store.remove(i);
+                self.playlist_store.insert(i, &BoxedAnyObject::new(updated_video));
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   pub fn stop(&self) {
     self.audio.stop();
     self.video_widget.stop();
     self.media_stack.set_visible_child_name("album_art");
     self.playback_source.set(PlaybackSource::None);
+  }
+
+  pub fn shuffle_enabled(&self) -> bool {
+    self.shuffle_enabled.get()
+  }
+
+  pub fn set_shuffle_enabled(&self, enabled: bool) {
+    self.shuffle_enabled.set(enabled);
   }
 
   pub fn play_next(&self) -> bool {
@@ -237,15 +348,20 @@ impl PlaybackController {
       return false;
     }
 
-    let next_index = match self.current_index.get() {
-      Some(idx) => {
-        if idx + 1 < len {
-          idx + 1
-        } else {
-          0
+    let next_index = if self.shuffle_enabled.get() {
+      let mut rng = rand::thread_rng();
+      rng.gen_range(0..len)
+    } else {
+      match self.current_index.get() {
+        Some(idx) => {
+          if idx + 1 < len {
+            idx + 1
+          } else {
+            0
+          }
         }
+        None => 0,
       }
-      None => 0,
     };
 
     self.play_index(next_index)

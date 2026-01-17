@@ -1,0 +1,45 @@
+version: 1
+script:
+  - mkdir -p AppDir/usr/bin
+  - cp target/release/fml9000 AppDir/usr/bin/
+  - mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
+  - cp img/icon.svg AppDir/usr/share/icons/hicolor/scalable/apps/fml9000.svg
+
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: com.github.fml9000
+    name: fml9000
+    icon: fml9000
+    version: 0.1.0
+    exec: usr/bin/fml9000
+
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+        key_url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C
+      - sourceline: deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+
+    include:
+      - libgtk-4-1
+      - libadwaita-1-0
+      - libasound2
+      - librsvg2-common
+      - libglib2.0-0
+      - libcairo2
+      - libpango-1.0-0
+      - libgdk-pixbuf-2.0-0
+
+  files:
+    exclude:
+      - usr/share/man
+      - usr/share/doc
+
+  runtime:
+    env:
+      GSK_RENDERER: cairo
+
+AppImage:
+  arch: x86_64
+  update-information: guess
