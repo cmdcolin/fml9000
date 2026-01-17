@@ -88,6 +88,7 @@ fn create_sorter(extract: impl Fn(&PlaylistItem) -> String + 'static) -> CustomS
 
 fn create_column(
   settings: Rc<RefCell<FmlSettings>>,
+  playback_controller: Rc<PlaybackController>,
   cb: impl Fn(&PlaylistItem) -> String + 'static,
 ) -> SignalListItemFactory {
   let factory = SignalListItemFactory::new();
@@ -103,6 +104,11 @@ fn create_column(
       cell.set_entry(&Entry {
         name: cb(&playlist_item),
       });
+      let is_playing = match &playlist_item {
+        PlaylistItem::Track(t) => playback_controller.is_track_playing(&t.filename),
+        PlaylistItem::Video(v) => playback_controller.is_video_playing(v.id),
+      };
+      cell.set_playing(is_playing);
     }
   });
   factory.connect_unbind(move |_factory, item| {
@@ -110,6 +116,7 @@ fn create_column(
     if let Some(child) = item.child() {
       if let Some(cell) = child.downcast_ref::<crate::grid_cell::GridCell>() {
         cell.set_entry(&Entry { name: String::new() });
+        cell.set_playing(false);
       }
     }
   });
@@ -174,7 +181,7 @@ pub fn create_playlist_view(
     .build();
 
 
-  let artistalbum = create_column(Rc::clone(&settings), |item| match item {
+  let artistalbum = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => {
       format!(
         "{} // {}",
@@ -188,12 +195,12 @@ pub fn create_playlist_view(
     }
   });
 
-  let track_num = create_column(Rc::clone(&settings), |item| match item {
+  let track_num = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
     PlaylistItem::Video(_) => String::new(),
   });
 
-  let duration = create_column(Rc::clone(&settings), |item| match item {
+  let duration = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => format_duration(r.duration_seconds),
     PlaylistItem::Video(v) => format_duration(v.duration_seconds),
   });
@@ -212,17 +219,17 @@ pub fn create_playlist_view(
     get_duration(obj1).cmp(&get_duration(obj2)).into()
   });
 
-  let title = create_column(Rc::clone(&settings), |item| match item {
+  let title = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => r.title.clone().unwrap_or_default(),
     PlaylistItem::Video(v) => v.title.clone(),
   });
 
-  let filename = create_column(Rc::clone(&settings), |item| match item {
+  let filename = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => r.filename.clone(),
     PlaylistItem::Video(v) => v.video_id.clone(),
   });
 
-  let date_added = create_column(Rc::clone(&settings), |item| match item {
+  let date_added = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => format_date(r.added),
     PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
   });
@@ -232,7 +239,7 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
   });
 
-  let last_played = create_column(Rc::clone(&settings), |item| match item {
+  let last_played = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => format_date(r.last_played),
     PlaylistItem::Video(v) => format_date(v.last_played),
   });
@@ -242,7 +249,7 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => format_date(v.last_played),
   });
 
-  let play_count = create_column(Rc::clone(&settings), |item| match item {
+  let play_count = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
     PlaylistItem::Track(r) => {
       if r.play_count > 0 {
         r.play_count.to_string()
@@ -524,6 +531,7 @@ pub fn create_playlist_view(
 
   let pc_for_keys = playback_controller.clone();
   let key_controller = EventControllerKey::new();
+  key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
   key_controller.connect_key_pressed(move |_, key, _, _| {
     match key {
       Key::space => {
@@ -558,6 +566,11 @@ pub fn create_playlist_view(
         pc_for_keys.stop();
         gtk::glib::Propagation::Stop
       }
+      Key::r | Key::R => {
+        let enabled = !pc_for_keys.shuffle_enabled();
+        pc_for_keys.set_shuffle_enabled(enabled);
+        gtk::glib::Propagation::Stop
+      }
       _ => gtk::glib::Propagation::Proceed,
     }
   });
@@ -587,6 +600,7 @@ pub fn create_playlist_view(
   let video_menu = gtk::gio::Menu::new();
   video_menu.append(Some("Play (Audio)"), Some("playlist.play-audio"));
   video_menu.append(Some("Play (Video)"), Some("playlist.play-video"));
+  video_menu.append(Some("Play Next"), Some("playlist.queue-video"));
   video_menu.append(Some("Open in Browser"), Some("playlist.open-browser"));
   video_menu.append(Some("Remove from Playlist"), Some("playlist.remove-video"));
 
@@ -595,6 +609,7 @@ pub fn create_playlist_view(
   video_popover.set_has_arrow(false);
 
   let track_menu = gtk::gio::Menu::new();
+  track_menu.append(Some("Play Next"), Some("playlist.queue-track"));
   track_menu.append(Some("Open Folder"), Some("playlist.open-folder"));
   track_menu.append(Some("Remove from Playlist"), Some("playlist.remove-track"));
 
@@ -644,6 +659,26 @@ pub fn create_playlist_view(
     }
   });
   action_group.add_action(&open_folder);
+
+  let ct = current_track.clone();
+  let pc = playback_controller.clone();
+  let queue_track = gtk::gio::SimpleAction::new("queue-track", None);
+  queue_track.connect_activate(move |_, _| {
+    if let Some(track) = ct.borrow().as_ref() {
+      pc.queue_track(track.filename.clone());
+    }
+  });
+  action_group.add_action(&queue_track);
+
+  let cv = current_video.clone();
+  let pc = playback_controller.clone();
+  let queue_video = gtk::gio::SimpleAction::new("queue-video", None);
+  queue_video.connect_activate(move |_, _| {
+    if let Some(video) = cv.borrow().as_ref() {
+      pc.queue_video(video.id);
+    }
+  });
+  action_group.add_action(&queue_video);
 
   let ct = current_track.clone();
   let cpid = current_playlist_id.clone();

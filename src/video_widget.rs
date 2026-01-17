@@ -167,16 +167,6 @@ impl VideoWidget {
         }
     }
 
-    pub fn toggle_pause(&self) {
-        if let Some(media_stream) = self.video.media_stream() {
-            if media_stream.is_playing() {
-                media_stream.pause();
-            } else {
-                media_stream.play();
-            }
-        }
-    }
-
     pub fn seek(&self, position: Duration) {
         if let Some(media_stream) = self.video.media_stream() {
             media_stream.seek(position.as_micros() as i64);
@@ -207,10 +197,6 @@ impl VideoWidget {
         } else {
             None
         }
-    }
-
-    pub fn is_video_active(&self) -> bool {
-        self.video_active.get()
     }
 
     pub fn is_playing(&self) -> bool {

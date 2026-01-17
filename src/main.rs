@@ -385,6 +385,11 @@ fn app_main(application: &Application) {
         pc_for_keys.stop();
         gtk::glib::Propagation::Stop
       }
+      Key::r | Key::R => {
+        let enabled = !pc_for_keys.shuffle_enabled();
+        pc_for_keys.set_shuffle_enabled(enabled);
+        gtk::glib::Propagation::Stop
+      }
       _ => gtk::glib::Propagation::Proceed,
     }
   });

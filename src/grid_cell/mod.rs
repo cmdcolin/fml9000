@@ -54,4 +54,12 @@ impl GridCell {
       *id_ref.borrow_mut() = value;
     }
   }
+
+  pub fn set_playing(&self, playing: bool) {
+    if playing {
+      self.add_css_class("playing");
+    } else {
+      self.remove_css_class("playing");
+    }
+  }
 }

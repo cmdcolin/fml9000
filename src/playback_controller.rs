@@ -18,6 +18,7 @@ use rand::Rng;
 use rodio::source::Source;
 use rodio::Decoder;
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -44,6 +45,12 @@ enum PlayableItem {
   YouTubeVideo(Rc<YouTubeVideo>),
 }
 
+#[derive(Clone)]
+pub enum QueuedItem {
+  Track(String),     // filename
+  Video(i32),        // video id
+}
+
 pub struct PlaybackController {
   audio: AudioPlayer,
   video_widget: Rc<VideoWidget>,
@@ -56,6 +63,7 @@ pub struct PlaybackController {
   album_art: Rc<Picture>,
   window: Rc<ApplicationWindow>,
   play_stats: RefCell<CurrentPlayStats>,
+  play_queue: RefCell<VecDeque<QueuedItem>>,
 }
 
 impl PlaybackController {
@@ -81,6 +89,7 @@ impl PlaybackController {
       album_art,
       window,
       play_stats: RefCell::new(CurrentPlayStats::None),
+      play_queue: RefCell::new(VecDeque::new()),
     })
   }
 
@@ -94,6 +103,13 @@ impl PlaybackController {
 
   pub fn playlist_len(&self) -> u32 {
     self.playlist_store.n_items()
+  }
+
+  fn refresh_playlist_view(&self) {
+    let n = self.playlist_store.n_items();
+    if n > 0 {
+      self.playlist_store.items_changed(0, n, n);
+    }
   }
 
   fn get_item_at(&self, index: u32) -> Option<PlayableItem> {
@@ -185,6 +201,7 @@ impl PlaybackController {
       duration_secs,
       counted: false,
     };
+    self.refresh_playlist_view();
 
     if !self.try_set_embedded_cover_art(&filename) {
       let mut cover_path = PathBuf::from(&filename);
@@ -240,6 +257,7 @@ impl PlaybackController {
       duration_secs: video.duration_seconds.map(|s| s as f64).unwrap_or(0.0),
       counted: false,
     };
+    self.refresh_playlist_view();
 
     self.window.set_title(Some(&format!(
       "fml9000 // YouTube - {}",
@@ -336,6 +354,8 @@ impl PlaybackController {
     self.video_widget.stop();
     self.media_stack.set_visible_child_name("album_art");
     self.playback_source.set(PlaybackSource::None);
+    *self.play_stats.borrow_mut() = CurrentPlayStats::None;
+    self.refresh_playlist_view();
   }
 
   pub fn shuffle_enabled(&self) -> bool {
@@ -368,7 +388,63 @@ impl PlaybackController {
     self.current_index.get()
   }
 
+  pub fn queue_track(&self, filename: String) {
+    self.play_queue.borrow_mut().push_back(QueuedItem::Track(filename));
+  }
+
+  pub fn queue_video(&self, video_id: i32) {
+    self.play_queue.borrow_mut().push_back(QueuedItem::Video(video_id));
+  }
+
+  pub fn queue_len(&self) -> usize {
+    self.play_queue.borrow().len()
+  }
+
+  fn play_from_queue(&self) -> bool {
+    let queued = self.play_queue.borrow_mut().pop_front();
+    if let Some(item) = queued {
+      match item {
+        QueuedItem::Track(filename) => {
+          // Find the track in the playlist and play it
+          let n_items = self.playlist_store.n_items();
+          for i in 0..n_items {
+            if let Some(playlist_item) = self.playlist_store.item(i) {
+              if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
+                if let Ok(track) = obj.try_borrow::<Rc<Track>>() {
+                  if track.filename == filename {
+                    return self.play_index(i);
+                  }
+                }
+              }
+            }
+          }
+        }
+        QueuedItem::Video(video_id) => {
+          // Find the video in the playlist and play it
+          let n_items = self.playlist_store.n_items();
+          for i in 0..n_items {
+            if let Some(playlist_item) = self.playlist_store.item(i) {
+              if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
+                if let Ok(video) = obj.try_borrow::<Rc<YouTubeVideo>>() {
+                  if video.id == video_id {
+                    return self.play_index(i);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    false
+  }
+
   pub fn play_next(&self) -> bool {
+    // Check queue first
+    if !self.play_queue.borrow().is_empty() {
+      return self.play_from_queue();
+    }
+
     let len = self.playlist_len();
     if len == 0 {
       return false;
@@ -430,5 +506,15 @@ impl PlaybackController {
     };
 
     self.play_index(prev_index)
+  }
+
+  pub fn is_track_playing(&self, filename: &str) -> bool {
+    let stats = self.play_stats.borrow();
+    matches!(&*stats, CurrentPlayStats::Track { filename: f, .. } if f == filename)
+  }
+
+  pub fn is_video_playing(&self, video_id: i32) -> bool {
+    let stats = self.play_stats.borrow();
+    matches!(&*stats, CurrentPlayStats::Video { id, .. } if *id == video_id)
   }
 }

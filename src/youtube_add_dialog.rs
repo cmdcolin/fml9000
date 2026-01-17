@@ -8,8 +8,9 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 enum FetchResult {
-  Success(ChannelInfo, Vec<VideoInfo>),
-  Error(String),
+  Success(String, ChannelInfo, Vec<VideoInfo>),
+  Error(String, String),
+  AllDone,
 }
 
 pub fn show_dialog(
@@ -19,9 +20,9 @@ pub fn show_dialog(
   let wnd = playback_controller.window();
 
   let dialog = gtk::Window::builder()
-    .title("Add YouTube Channel")
-    .default_width(450)
-    .default_height(200)
+    .title("Add YouTube Channels")
+    .default_width(500)
+    .default_height(350)
     .modal(true)
     .transient_for(&**wnd)
     .build();
@@ -35,9 +36,22 @@ pub fn show_dialog(
     .margin_end(24)
     .build();
 
-  let url_entry = gtk::Entry::builder()
-    .placeholder_text("YouTube channel URL or handle (e.g. @channelname)")
+  let hint_label = gtk::Label::builder()
+    .label("Enter YouTube channel URLs or handles (one per line)")
+    .xalign(0.0)
+    .build();
+
+  let url_textview = gtk::TextView::builder()
     .hexpand(true)
+    .vexpand(true)
+    .wrap_mode(gtk::WrapMode::Word)
+    .build();
+
+  let scrolled = gtk::ScrolledWindow::builder()
+    .hscrollbar_policy(gtk::PolicyType::Never)
+    .vscrollbar_policy(gtk::PolicyType::Automatic)
+    .min_content_height(150)
+    .child(&url_textview)
     .build();
 
   let status_label = gtk::Label::builder()
@@ -61,7 +75,7 @@ pub fn show_dialog(
   let cancel_btn = gtk::Button::builder().label("Cancel").build();
 
   let add_btn = gtk::Button::builder()
-    .label("Add Channel")
+    .label("Add Channels")
     .css_classes(["suggested-action"])
     .sensitive(false)
     .build();
@@ -69,17 +83,25 @@ pub fn show_dialog(
   button_box.append(&cancel_btn);
   button_box.append(&add_btn);
 
-  content.append(&url_entry);
+  content.append(&hint_label);
+  content.append(&scrolled);
   content.append(&spinner);
   content.append(&status_label);
   content.append(&button_box);
 
   dialog.set_child(Some(&content));
 
+  let buffer = url_textview.buffer();
   let add_btn_clone = add_btn.clone();
-  url_entry.connect_changed(move |entry| {
-    let text = entry.text();
-    add_btn_clone.set_sensitive(!text.is_empty() && parse_youtube_url(&text).is_some());
+  buffer.connect_changed(move |buf| {
+    let text = buf.text(&buf.start_iter(), &buf.end_iter(), false);
+    let has_valid = text
+      .lines()
+      .any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && parse_youtube_url(trimmed).is_some()
+      });
+    add_btn_clone.set_sensitive(has_valid);
   });
 
   let dialog_weak = dialog.downgrade();
@@ -89,14 +111,30 @@ pub fn show_dialog(
     }
   });
 
-  let on_channel_added = Rc::new(RefCell::new(Some(on_channel_added)));
+  let on_channel_added = Rc::new(on_channel_added);
   let dialog_weak = dialog.downgrade();
-  let url_entry_clone = url_entry.clone();
+  let buffer_clone = buffer.clone();
   let status_label_clone = status_label.clone();
   let spinner_clone = spinner.clone();
   let add_btn_clone = add_btn.clone();
   add_btn.connect_clicked(move |_| {
-    let url = url_entry_clone.text().to_string();
+    let text = buffer_clone.text(&buffer_clone.start_iter(), &buffer_clone.end_iter(), false);
+    let urls: Vec<String> = text
+      .lines()
+      .filter_map(|line| {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+          parse_youtube_url(trimmed)
+        } else {
+          None
+        }
+      })
+      .collect();
+
+    if urls.is_empty() {
+      return;
+    }
+
     let status2 = status_label_clone.clone();
     let spin2 = spinner_clone.clone();
     let btn2 = add_btn_clone.clone();
@@ -106,24 +144,36 @@ pub fn show_dialog(
     btn2.set_sensitive(false);
     spin2.set_visible(true);
     spin2.set_spinning(true);
-    status2.set_label("Fetching channel info...");
+
+    let total = urls.len();
+    status2.set_label(&format!("Fetching channel 1 of {}...", total));
 
     let (tx, rx) = mpsc::channel::<FetchResult>();
 
     std::thread::spawn(move || {
-      let result = fetch_channel_info(&url, |_| {});
-      let msg = match result {
-        Ok((channel, videos)) => FetchResult::Success(channel, videos),
-        Err(e) => FetchResult::Error(e),
-      };
-      let _ = tx.send(msg);
+      for (idx, url) in urls.iter().enumerate() {
+        let result = fetch_channel_info(url, |_| {});
+        let msg = match result {
+          Ok((channel, videos)) => FetchResult::Success(url.clone(), channel, videos),
+          Err(e) => FetchResult::Error(url.clone(), e),
+        };
+        let _ = tx.send(msg);
+        if idx < urls.len() - 1 {
+          std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+      }
+      let _ = tx.send(FetchResult::AllDone);
     });
+
+    let added_count = Rc::new(RefCell::new(0usize));
+    let error_count = Rc::new(RefCell::new(0usize));
+    let processed_count = Rc::new(RefCell::new(0usize));
 
     glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
       match rx.try_recv() {
-        Ok(FetchResult::Success(channel, videos)) => {
-          spin2.set_spinning(false);
-          spin2.set_visible(false);
+        Ok(FetchResult::Success(_url, channel, videos)) => {
+          *processed_count.borrow_mut() += 1;
+          let processed = *processed_count.borrow();
 
           match add_youtube_channel(
             &channel.channel_id,
@@ -146,32 +196,48 @@ pub fn show_dialog(
                 })
                 .collect();
               let _ = add_youtube_videos(db_channel_id, &video_tuples);
-
-              status2.set_label(&format!("Added {} with {} videos", channel.name, videos.len()));
-
-              if let Some(cb) = callback.borrow_mut().take() {
-                cb();
-              }
-
-              let dialog_weak3 = dialog_weak2.clone();
-              glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
-                if let Some(d) = dialog_weak3.upgrade() {
-                  d.close();
-                }
-              });
+              *added_count.borrow_mut() += 1;
+              callback();
             }
-            Err(e) => {
-              status2.set_label(&format!("Error: {e}"));
-              btn2.set_sensitive(true);
+            Err(_e) => {
+              *error_count.borrow_mut() += 1;
             }
           }
-          glib::ControlFlow::Break
+
+          if processed < total {
+            status2.set_label(&format!("Fetching channel {} of {}...", processed + 1, total));
+          }
+          glib::ControlFlow::Continue
         }
-        Ok(FetchResult::Error(e)) => {
+        Ok(FetchResult::Error(_url, _e)) => {
+          *processed_count.borrow_mut() += 1;
+          *error_count.borrow_mut() += 1;
+          let processed = *processed_count.borrow();
+
+          if processed < total {
+            status2.set_label(&format!("Fetching channel {} of {}...", processed + 1, total));
+          }
+          glib::ControlFlow::Continue
+        }
+        Ok(FetchResult::AllDone) => {
           spin2.set_spinning(false);
           spin2.set_visible(false);
-          status2.set_label(&format!("Error: {e}"));
-          btn2.set_sensitive(true);
+
+          let added = *added_count.borrow();
+          let errors = *error_count.borrow();
+
+          if errors == 0 {
+            status2.set_label(&format!("Added {} channels", added));
+          } else {
+            status2.set_label(&format!("Added {} channels, {} failed", added, errors));
+          }
+
+          let dialog_weak3 = dialog_weak2.clone();
+          glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
+            if let Some(d) = dialog_weak3.upgrade() {
+              d.close();
+            }
+          });
           glib::ControlFlow::Break
         }
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
