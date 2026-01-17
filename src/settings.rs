@@ -1,4 +1,5 @@
 use directories::ProjectDirs;
+use serde::de::{Deserialize, Deserializer};
 use serde_derive::{Deserialize, Serialize};
 use std::io::Write;
 
@@ -6,19 +7,53 @@ fn default_volume() -> f64 {
   1.0
 }
 
+fn deserialize_folders<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+  D: Deserializer<'de>,
+{
+  #[derive(Deserialize)]
+  #[serde(untagged)]
+  enum FoldersOrFolder {
+    Folders(Vec<String>),
+    Folder(Option<String>),
+  }
+
+  match FoldersOrFolder::deserialize(deserializer)? {
+    FoldersOrFolder::Folders(v) => Ok(v),
+    FoldersOrFolder::Folder(Some(f)) => Ok(vec![f]),
+    FoldersOrFolder::Folder(None) => Ok(Vec::new()),
+  }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FmlSettings {
-  pub folder: Option<String>,
+  #[serde(default, deserialize_with = "deserialize_folders", alias = "folder")]
+  pub folders: Vec<String>,
   #[serde(default = "default_volume")]
   pub volume: f64,
+  #[serde(default)]
+  pub rescan_on_startup: bool,
 }
 
 impl Default for FmlSettings {
   fn default() -> Self {
     FmlSettings {
-      folder: None,
+      folders: Vec::new(),
       volume: 1.0,
+      rescan_on_startup: false,
     }
+  }
+}
+
+impl FmlSettings {
+  pub fn add_folder(&mut self, folder: String) {
+    if !self.folders.contains(&folder) {
+      self.folders.push(folder);
+    }
+  }
+
+  pub fn remove_folder(&mut self, folder: &str) {
+    self.folders.retain(|f| f != folder);
   }
 }
 

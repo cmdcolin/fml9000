@@ -11,7 +11,7 @@ mod settings;
 use adw::prelude::*;
 use adw::Application;
 use facet_box::create_facet_box;
-use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan};
+use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan_folders};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::{AlertDialog, ApplicationWindow, CustomFilter, Image, Orientation, Paned};
@@ -150,8 +150,9 @@ fn app_main(application: &Application) {
     }
   };
 
-  if let Some(folder) = &settings.borrow().folder {
-    run_scan(folder, &tracks);
+  if settings.borrow().rescan_on_startup {
+    let folders = settings.borrow().folders.clone();
+    run_scan_folders(&folders, &tracks);
   }
 
   let filter = CustomFilter::new(|_| true);
@@ -198,7 +199,7 @@ fn app_main(application: &Application) {
     .build();
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
-  let header = create_header_bar(Rc::clone(&settings), audio, &window);
+  let header = create_header_bar(Rc::clone(&settings), audio, &window, Rc::clone(&tracks));
 
   main_ui.append(&header);
   main_ui.append(&main_pane);

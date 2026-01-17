@@ -2,6 +2,7 @@ use crate::gtk_helpers::{create_button, load_img};
 use crate::settings::FmlSettings;
 use crate::AudioPlayer;
 use adw::prelude::*;
+use fml9000::models::Track;
 use gtk::glib::MainContext;
 use gtk::{Adjustment, Orientation, Scale, ScaleButton};
 use std::cell::RefCell;
@@ -18,6 +19,7 @@ pub fn create_header_bar(
   settings: Rc<RefCell<FmlSettings>>,
   audio: AudioPlayer,
   window: &Rc<gtk::ApplicationWindow>,
+  tracks: Rc<Vec<Rc<Track>>>,
 ) -> gtk::Box {
   let audio_for_volume = audio.clone();
   let audio_for_pause = audio.clone();
@@ -80,6 +82,7 @@ pub fn create_header_bar(
     MainContext::default().spawn_local(crate::preferences_dialog::dialog(
       Rc::clone(&window_for_settings),
       Rc::clone(&settings),
+      Rc::clone(&tracks),
     ));
   });
 

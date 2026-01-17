@@ -107,6 +107,12 @@ pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
   }
 }
 
+pub fn run_scan_folders(folders: &[String], rows: &[Rc<Track>]) {
+  for folder in folders {
+    run_scan(folder, rows);
+  }
+}
+
 pub fn add_track_to_recently_played(path: &str) {
   use self::schema::recently_played;
 
