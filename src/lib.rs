@@ -3,7 +3,7 @@ pub mod models;
 pub mod schema;
 
 use self::models::*;
-use self::schema::{tracks, youtube_channels, youtube_videos};
+use self::schema::{playlist_tracks, playlists, tracks, youtube_channels, youtube_videos};
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
@@ -290,4 +290,209 @@ pub fn update_channel_last_fetched(id: i32) -> Result<(), String> {
     .map_err(|e| format!("Failed to update last_fetched: {e}"))?;
 
   Ok(())
+}
+
+pub fn create_playlist(name: &str) -> Result<i32, String> {
+  use self::models::NewPlaylist;
+
+  let mut conn = connect_db()?;
+
+  diesel::insert_into(playlists::table)
+    .values(NewPlaylist { name })
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to create playlist: {e}"))?;
+
+  playlists::table
+    .order(playlists::id.desc())
+    .select(playlists::id)
+    .first::<i32>(&mut conn)
+    .map_err(|e| format!("Failed to get playlist id: {e}"))
+}
+
+pub fn get_user_playlists() -> Result<Vec<Rc<models::Playlist>>, String> {
+  use self::models::Playlist;
+
+  let mut conn = connect_db()?;
+
+  playlists::table
+    .order(playlists::name.asc())
+    .load::<Playlist>(&mut conn)
+    .map(|v| v.into_iter().map(Rc::new).collect())
+    .map_err(|e| format!("Failed to load playlists: {e}"))
+}
+
+pub fn add_track_to_playlist(playlist_id: i32, track_filename: &str) -> Result<(), String> {
+  use self::models::NewPlaylistTrack;
+
+  let mut conn = connect_db()?;
+
+  let max_position: Option<i32> = playlist_tracks::table
+    .filter(playlist_tracks::playlist_id.eq(playlist_id))
+    .select(diesel::dsl::max(playlist_tracks::position))
+    .first(&mut conn)
+    .map_err(|e| format!("Failed to get max position: {e}"))?;
+
+  let next_position = max_position.unwrap_or(0) + 1;
+
+  diesel::insert_into(playlist_tracks::table)
+    .values(NewPlaylistTrack {
+      playlist_id,
+      track_filename: Some(track_filename),
+      youtube_video_id: None,
+      position: next_position,
+    })
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to add track to playlist: {e}"))?;
+
+  Ok(())
+}
+
+pub fn add_video_to_playlist(playlist_id: i32, video_id: i32) -> Result<(), String> {
+  use self::models::NewPlaylistTrack;
+
+  let mut conn = connect_db()?;
+
+  let max_position: Option<i32> = playlist_tracks::table
+    .filter(playlist_tracks::playlist_id.eq(playlist_id))
+    .select(diesel::dsl::max(playlist_tracks::position))
+    .first(&mut conn)
+    .map_err(|e| format!("Failed to get max position: {e}"))?;
+
+  let next_position = max_position.unwrap_or(0) + 1;
+
+  diesel::insert_into(playlist_tracks::table)
+    .values(NewPlaylistTrack {
+      playlist_id,
+      track_filename: None,
+      youtube_video_id: Some(video_id),
+      position: next_position,
+    })
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to add video to playlist: {e}"))?;
+
+  Ok(())
+}
+
+pub enum UserPlaylistItem {
+  Track(Rc<Track>),
+  Video(Rc<models::YouTubeVideo>),
+}
+
+pub fn get_playlist_items(playlist_id: i32) -> Result<Vec<UserPlaylistItem>, String> {
+  let mut conn = connect_db()?;
+
+  let items: Vec<models::PlaylistTrack> = playlist_tracks::table
+    .filter(playlist_tracks::playlist_id.eq(playlist_id))
+    .order(playlist_tracks::position.asc())
+    .load(&mut conn)
+    .map_err(|e| format!("Failed to load playlist items: {e}"))?;
+
+  let mut result = Vec::new();
+  for item in items {
+    if let Some(filename) = &item.track_filename {
+      let track: Option<Track> = tracks::table
+        .filter(tracks::filename.eq(filename))
+        .first(&mut conn)
+        .ok();
+      if let Some(t) = track {
+        result.push(UserPlaylistItem::Track(Rc::new(t)));
+      }
+    }
+    if let Some(vid_id) = item.youtube_video_id {
+      let video: Option<models::YouTubeVideo> = youtube_videos::table
+        .filter(youtube_videos::id.eq(vid_id))
+        .first(&mut conn)
+        .ok();
+      if let Some(v) = video {
+        result.push(UserPlaylistItem::Video(Rc::new(v)));
+      }
+    }
+  }
+
+  Ok(result)
+}
+
+pub fn delete_playlist(id: i32) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  diesel::delete(playlists::table.filter(playlists::id.eq(id)))
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to delete playlist: {e}"))?;
+
+  Ok(())
+}
+
+pub fn rename_playlist(id: i32, new_name: &str) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  diesel::update(playlists::table.filter(playlists::id.eq(id)))
+    .set(playlists::name.eq(new_name))
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to rename playlist: {e}"))?;
+
+  Ok(())
+}
+
+pub fn remove_track_from_playlist(playlist_id: i32, track_filename: &str) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  diesel::delete(
+    playlist_tracks::table
+      .filter(playlist_tracks::playlist_id.eq(playlist_id))
+      .filter(playlist_tracks::track_filename.eq(track_filename)),
+  )
+  .execute(&mut conn)
+  .map_err(|e| format!("Failed to remove track: {e}"))?;
+
+  Ok(())
+}
+
+pub fn remove_video_from_playlist(playlist_id: i32, video_id: i32) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  diesel::delete(
+    playlist_tracks::table
+      .filter(playlist_tracks::playlist_id.eq(playlist_id))
+      .filter(playlist_tracks::youtube_video_id.eq(video_id)),
+  )
+  .execute(&mut conn)
+  .map_err(|e| format!("Failed to remove video: {e}"))?;
+
+  Ok(())
+}
+
+pub fn reorder_playlist_items(playlist_id: i32, items: &[PlaylistItemIdentifier]) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  for (position, item) in items.iter().enumerate() {
+    match item {
+      PlaylistItemIdentifier::Track(filename) => {
+        diesel::update(
+          playlist_tracks::table
+            .filter(playlist_tracks::playlist_id.eq(playlist_id))
+            .filter(playlist_tracks::track_filename.eq(filename)),
+        )
+        .set(playlist_tracks::position.eq(position as i32))
+        .execute(&mut conn)
+        .map_err(|e| format!("Failed to update track position: {e}"))?;
+      }
+      PlaylistItemIdentifier::Video(vid_id) => {
+        diesel::update(
+          playlist_tracks::table
+            .filter(playlist_tracks::playlist_id.eq(playlist_id))
+            .filter(playlist_tracks::youtube_video_id.eq(vid_id)),
+        )
+        .set(playlist_tracks::position.eq(position as i32))
+        .execute(&mut conn)
+        .map_err(|e| format!("Failed to update video position: {e}"))?;
+      }
+    }
+  }
+
+  Ok(())
+}
+
+pub enum PlaylistItemIdentifier {
+  Track(String),
+  Video(i32),
 }

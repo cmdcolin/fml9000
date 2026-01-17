@@ -1,6 +1,25 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    playlist_tracks (id) {
+        id -> Integer,
+        playlist_id -> Integer,
+        track_filename -> Nullable<Text>,
+        youtube_video_id -> Nullable<Integer>,
+        position -> Integer,
+        added_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    playlists (id) {
+        id -> Integer,
+        name -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     recently_played (filename) {
         filename -> Text,
         timestamp -> Nullable<Timestamp>,
@@ -46,11 +65,16 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(playlist_tracks -> playlists (playlist_id));
+diesel::joinable!(playlist_tracks -> tracks (track_filename));
+diesel::joinable!(playlist_tracks -> youtube_videos (youtube_video_id));
 diesel::joinable!(youtube_videos -> youtube_channels (channel_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    recently_played,
-    tracks,
-    youtube_channels,
-    youtube_videos,
+  playlist_tracks,
+  playlists,
+  recently_played,
+  tracks,
+  youtube_channels,
+  youtube_videos,
 );

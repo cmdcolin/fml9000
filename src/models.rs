@@ -1,4 +1,4 @@
-use crate::schema::{recently_played, tracks, youtube_channels, youtube_videos};
+use crate::schema::{playlist_tracks, playlists, recently_played, tracks, youtube_channels, youtube_videos};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
@@ -84,4 +84,38 @@ pub struct NewYouTubeVideo<'a> {
   pub duration_seconds: Option<i32>,
   pub thumbnail_url: Option<&'a str>,
   pub published_at: Option<NaiveDateTime>,
+}
+
+#[derive(Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::playlists)]
+pub struct Playlist {
+  pub id: i32,
+  pub name: String,
+  pub created_at: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = playlists)]
+pub struct NewPlaylist<'a> {
+  pub name: &'a str,
+}
+
+#[derive(Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::playlist_tracks)]
+pub struct PlaylistTrack {
+  pub id: i32,
+  pub playlist_id: i32,
+  pub track_filename: Option<String>,
+  pub youtube_video_id: Option<i32>,
+  pub position: i32,
+  pub added_at: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = playlist_tracks)]
+pub struct NewPlaylistTrack<'a> {
+  pub playlist_id: i32,
+  pub track_filename: Option<&'a str>,
+  pub youtube_video_id: Option<i32>,
+  pub position: i32,
 }

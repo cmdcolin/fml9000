@@ -4,12 +4,15 @@ use adw::subclass::prelude::*;
 
 use gtk::BinLayout;
 use gtk::CompositeTemplate;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Debug, Default, CompositeTemplate)]
 #[template(file = "grid_cell.ui")]
 pub struct GridCell {
   #[template_child]
   pub name: TemplateChild<gtk::Label>,
+  pub playlist_id: RefCell<Option<Rc<RefCell<Option<i32>>>>>,
 }
 
 #[glib::object_subclass]

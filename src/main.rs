@@ -4,6 +4,7 @@ mod gtk_helpers;
 mod header_bar;
 mod load_css;
 mod mpv_player;
+mod new_playlist_dialog;
 mod playback_controller;
 mod playlist_manager;
 mod playlist_view;
@@ -230,10 +231,13 @@ fn app_main(application: &Application) {
     Rc::clone(&window),
   );
 
+  let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+
   let playlist_view = create_playlist_view(
     playlist_store.clone(),
     Rc::clone(&playback_controller),
     Rc::clone(&settings),
+    Rc::clone(&current_playlist_id),
   );
   let playlist_mgr_view = create_playlist_manager(
     &playlist_mgr_store,
@@ -241,6 +245,7 @@ fn app_main(application: &Application) {
     Rc::clone(&tracks),
     Rc::clone(&playback_controller),
     Rc::clone(&settings),
+    Rc::clone(&current_playlist_id),
   );
   let playlist_store_for_header = playlist_store.clone();
   let facet_store_for_header = facet_store.clone();

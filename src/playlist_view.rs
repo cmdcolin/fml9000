@@ -3,17 +3,32 @@ use crate::gtk_helpers::{get_cell, setup_col, str_or_unknown};
 use crate::mpv_player::open_in_browser;
 use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
+use chrono::NaiveDateTime;
 use fml9000::models::{Track, YouTubeVideo};
+use fml9000::{
+  get_playlist_items, reorder_playlist_items, remove_track_from_playlist,
+  remove_video_from_playlist, PlaylistItemIdentifier, UserPlaylistItem,
+};
+use gtk::gdk;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  ColumnView, ColumnViewColumn, CustomSorter, GestureClick, MultiSelection, PopoverMenu,
-  ScrolledWindow, SignalListItemFactory, SortListModel,
+  ColumnView, ColumnViewColumn, CustomSorter, DragSource, DropTarget, GestureClick, MultiSelection,
+  PopoverMenu, ScrolledWindow, SignalListItemFactory, SortListModel,
 };
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+
+pub type CurrentPlaylistId = Rc<RefCell<Option<i32>>>;
+
+fn format_date(dt: Option<NaiveDateTime>) -> String {
+  match dt {
+    Some(d) => d.format("%Y-%m-%d").to_string(),
+    None => String::new(),
+  }
+}
 
 fn open_folder_in_explorer(file_path: &str) {
   if let Some(parent) = Path::new(file_path).parent() {
@@ -39,6 +54,7 @@ fn open_folder_in_explorer(file_path: &str) {
   }
 }
 
+#[derive(Clone)]
 enum PlaylistItem {
   Track(Rc<Track>),
   Video(Rc<YouTubeVideo>),
@@ -75,7 +91,9 @@ fn create_column(
   cb: impl Fn(&PlaylistItem) -> String + 'static,
 ) -> SignalListItemFactory {
   let factory = SignalListItemFactory::new();
-  factory.connect_setup(move |_factory, item| setup_col(item));
+  factory.connect_setup(move |_factory, item| {
+    setup_col(item);
+  });
   let settings_for_bind = settings.clone();
   factory.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
@@ -102,6 +120,7 @@ pub fn create_playlist_view(
   playlist_store: ListStore,
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
+  current_playlist_id: CurrentPlaylistId,
 ) -> ScrolledWindow {
   // Create sorters for each column
   let artistalbum_sorter = create_sorter(|item| match item {
@@ -178,6 +197,16 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => v.video_id.clone(),
   });
 
+  let date_added = create_column(Rc::clone(&settings), |item| match item {
+    PlaylistItem::Track(r) => format_date(r.added),
+    PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
+  });
+
+  let date_sorter = create_sorter(|item| match item {
+    PlaylistItem::Track(r) => format_date(r.added),
+    PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
+  });
+
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
@@ -208,6 +237,15 @@ pub fn create_playlist_view(
   let playlist_col4 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
+    .fixed_width(100)
+    .title("Date Added")
+    .factory(&date_added)
+    .sorter(&date_sorter)
+    .build();
+
+  let playlist_col5 = ColumnViewColumn::builder()
+    .expand(false)
+    .resizable(true)
     .fixed_width(2000)
     .title("Filename")
     .factory(&filename)
@@ -218,12 +256,175 @@ pub fn create_playlist_view(
   playlist_columnview.append_column(&playlist_col2);
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
+  playlist_columnview.append_column(&playlist_col5);
 
   // Bind ColumnView sorter to the SortListModel
   playlist_columnview
     .bind_property("sorter", &sort_model, "sorter")
     .sync_create()
     .build();
+
+  let drag_source = DragSource::new();
+  drag_source.set_actions(gdk::DragAction::COPY);
+  let sel_for_drag = playlist_sel.clone();
+  let store_for_drag = playlist_store.clone();
+  drag_source.connect_prepare(move |_source, _x, _y| {
+    let selection = sel_for_drag.selection();
+    let mut items: Vec<String> = Vec::new();
+
+    let n_items = store_for_drag.n_items();
+    for pos in 0..n_items {
+      if selection.contains(pos) {
+        if let Some(item) = store_for_drag.item(pos) {
+          if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+            if let Some(playlist_item) = try_get_item(&obj) {
+              items.push(match playlist_item {
+                PlaylistItem::Track(track) => format!("track:{}", track.filename),
+                PlaylistItem::Video(video) => format!("video:{}", video.id),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if items.is_empty() {
+      return None;
+    }
+
+    let data = items.join("\n");
+    Some(gdk::ContentProvider::for_value(&data.to_value()))
+  });
+  playlist_columnview.add_controller(drag_source);
+
+  let drop_target = DropTarget::new(gtk::glib::Type::STRING, gdk::DragAction::MOVE);
+  let cpid_for_drop = current_playlist_id.clone();
+  let store_for_drop = playlist_store.clone();
+  drop_target.connect_drop(move |_target, value, _x, y| {
+    let Some(playlist_id) = *cpid_for_drop.borrow() else {
+      return false;
+    };
+
+    let Ok(data) = value.get::<String>() else {
+      return false;
+    };
+
+    let n_items = store_for_drop.n_items();
+    if n_items == 0 {
+      return false;
+    }
+
+    let row_height = 24.0_f64;
+    let header_height = 24.0_f64;
+    let drop_index = ((y - header_height) / row_height).floor().max(0.0) as u32;
+    let drop_index = drop_index.min(n_items.saturating_sub(1));
+
+    let mut identifiers: Vec<PlaylistItemIdentifier> = Vec::new();
+    let mut dragged_indices: Vec<u32> = Vec::new();
+
+    for line in data.lines() {
+      if let Some(filename) = line.strip_prefix("track:") {
+        for i in 0..n_items {
+          if let Some(item) = store_for_drop.item(i) {
+            if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+              if let Some(PlaylistItem::Track(t)) = try_get_item(&obj) {
+                if t.filename == filename {
+                  dragged_indices.push(i);
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      if let Some(video_id_str) = line.strip_prefix("video:") {
+        if let Ok(vid_id) = video_id_str.parse::<i32>() {
+          for i in 0..n_items {
+            if let Some(item) = store_for_drop.item(i) {
+              if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+                if let Some(PlaylistItem::Video(v)) = try_get_item(&obj) {
+                  if v.id == vid_id {
+                    dragged_indices.push(i);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if dragged_indices.is_empty() {
+      return false;
+    }
+
+    dragged_indices.sort();
+
+    for i in 0..n_items {
+      if !dragged_indices.contains(&i) {
+        if let Some(item) = store_for_drop.item(i) {
+          if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+            if let Some(playlist_item) = try_get_item(&obj) {
+              match playlist_item {
+                PlaylistItem::Track(t) => identifiers.push(PlaylistItemIdentifier::Track(t.filename.clone())),
+                PlaylistItem::Video(v) => identifiers.push(PlaylistItemIdentifier::Video(v.id)),
+              }
+            }
+          }
+        }
+      }
+    }
+
+    let insert_pos = if drop_index == 0 {
+      0
+    } else {
+      let mut pos = 0;
+      for i in 0..=drop_index {
+        if !dragged_indices.contains(&i) {
+          pos += 1;
+        }
+      }
+      pos
+    };
+
+    let mut dragged_items: Vec<PlaylistItemIdentifier> = Vec::new();
+    for &idx in &dragged_indices {
+      if let Some(item) = store_for_drop.item(idx) {
+        if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+          if let Some(playlist_item) = try_get_item(&obj) {
+            match playlist_item {
+              PlaylistItem::Track(t) => dragged_items.push(PlaylistItemIdentifier::Track(t.filename.clone())),
+              PlaylistItem::Video(v) => dragged_items.push(PlaylistItemIdentifier::Video(v.id)),
+            }
+          }
+        }
+      }
+    }
+
+    for item in dragged_items.into_iter().rev() {
+      identifiers.insert(insert_pos, item);
+    }
+
+    if reorder_playlist_items(playlist_id, &identifiers).is_ok() {
+      store_for_drop.remove_all();
+      if let Ok(items) = get_playlist_items(playlist_id) {
+        for item in items {
+          match item {
+            UserPlaylistItem::Track(track) => {
+              store_for_drop.append(&BoxedAnyObject::new(track));
+            }
+            UserPlaylistItem::Video(video) => {
+              store_for_drop.append(&BoxedAnyObject::new(video));
+            }
+          }
+        }
+      }
+    }
+
+    true
+  });
+  playlist_columnview.add_controller(drop_target);
 
   let pc_for_activate = playback_controller.clone();
   let store_for_activate = playlist_store.clone();
@@ -250,6 +451,7 @@ pub fn create_playlist_view(
   video_menu.append(Some("Play (Audio)"), Some("playlist.play-audio"));
   video_menu.append(Some("Play (Video)"), Some("playlist.play-video"));
   video_menu.append(Some("Open in Browser"), Some("playlist.open-browser"));
+  video_menu.append(Some("Remove from Playlist"), Some("playlist.remove-video"));
 
   let video_popover = PopoverMenu::from_model(Some(&video_menu));
   video_popover.set_parent(&playlist_columnview);
@@ -257,6 +459,7 @@ pub fn create_playlist_view(
 
   let track_menu = gtk::gio::Menu::new();
   track_menu.append(Some("Open Folder"), Some("playlist.open-folder"));
+  track_menu.append(Some("Remove from Playlist"), Some("playlist.remove-track"));
 
   let track_popover = PopoverMenu::from_model(Some(&track_menu));
   track_popover.set_parent(&playlist_columnview);
@@ -304,6 +507,58 @@ pub fn create_playlist_view(
     }
   });
   action_group.add_action(&open_folder);
+
+  let ct = current_track.clone();
+  let cpid = current_playlist_id.clone();
+  let store_for_remove = playlist_store.clone();
+  let remove_track = gtk::gio::SimpleAction::new("remove-track", None);
+  remove_track.connect_activate(move |_, _| {
+    if let Some(playlist_id) = *cpid.borrow() {
+      if let Some(track) = ct.borrow().as_ref() {
+        if remove_track_from_playlist(playlist_id, &track.filename).is_ok() {
+          for i in 0..store_for_remove.n_items() {
+            if let Some(item) = store_for_remove.item(i) {
+              if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+                if let Some(PlaylistItem::Track(t)) = try_get_item(&obj) {
+                  if t.filename == track.filename {
+                    store_for_remove.remove(i);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  action_group.add_action(&remove_track);
+
+  let cv = current_video.clone();
+  let cpid = current_playlist_id.clone();
+  let store_for_remove = playlist_store.clone();
+  let remove_video = gtk::gio::SimpleAction::new("remove-video", None);
+  remove_video.connect_activate(move |_, _| {
+    if let Some(playlist_id) = *cpid.borrow() {
+      if let Some(video) = cv.borrow().as_ref() {
+        if remove_video_from_playlist(playlist_id, video.id).is_ok() {
+          for i in 0..store_for_remove.n_items() {
+            if let Some(item) = store_for_remove.item(i) {
+              if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+                if let Some(PlaylistItem::Video(v)) = try_get_item(&obj) {
+                  if v.id == video.id {
+                    store_for_remove.remove(i);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  action_group.add_action(&remove_video);
 
   playlist_columnview.insert_action_group("playlist", Some(&action_group));
 

@@ -1,0 +1,20 @@
+# Playlist Feature Ideas
+
+## High priority
+
+1. Confirmation dialog for delete - Currently playlist deletion is immediate with no confirmation
+2. Drop position indicator - Show a visual line where items will be inserted when reordering
+3. Duplicate prevention - Prevent adding the same track/video to a playlist twice
+4. Batch remove - Allow removing multiple selected items at once (currently only one at a time via context menu)
+
+## Medium priority
+
+5. Playlist item count - Show track count next to each playlist in the sidebar (e.g., "My Playlist (12)")
+6. Empty state message - Show helpful text when a playlist is empty
+7. Keyboard shortcuts - Delete key to remove selected items, F2 to rename playlist
+
+## Nice to have
+
+8. Drag count indicator - Show how many items are being dragged (e.g., "3 items")
+9. Copy/duplicate playlist - Right-click option to duplicate a playlist
+10. Total duration - Show total playlist duration in the header
