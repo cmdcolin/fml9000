@@ -20,7 +20,3 @@ serde_json = "1"
 toml = "0.8"
 walkdir = "2"
 adw = { version = "0.7", package = "libadwaita" }
-libmpv2 = { version = "4", features = ["render"] }
-epoxy = "0.1"
-gl = "0.14"
-libc = "0.2"

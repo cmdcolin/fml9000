@@ -1,6 +1,6 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, setup_col, str_or_unknown};
-use crate::mpv_player::open_in_browser;
+use crate::video_widget::open_in_browser;
 use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
 use chrono::NaiveDateTime;

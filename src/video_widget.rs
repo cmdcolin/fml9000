@@ -7,6 +7,11 @@ use std::process::Command;
 use std::rc::Rc;
 use std::time::Duration;
 
+pub fn open_in_browser(video_id: &str) {
+    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    let _ = Command::new("xdg-open").arg(&url).spawn();
+}
+
 pub struct VideoWidget {
     stack: Stack,
     video: Video,
@@ -68,7 +73,6 @@ impl VideoWidget {
     }
 
     pub fn play(&self, url: &str) {
-        eprintln!("VideoWidget::play() with URL: {}", &url[..url.len().min(100)]);
 
         // Use MediaFile with gio::File for HTTP URLs
         if url.starts_with("http://") || url.starts_with("https://") {

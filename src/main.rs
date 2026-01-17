@@ -3,7 +3,6 @@ mod grid_cell;
 mod gtk_helpers;
 mod header_bar;
 mod load_css;
-mod mpv_player;
 mod new_playlist_dialog;
 mod playback_controller;
 mod playlist_manager;
@@ -228,9 +227,7 @@ fn app_main(application: &Application) {
   let album_art = Rc::new(album_art);
 
   // Create video widget for embedded GStreamer playback
-  eprintln!("About to create VideoWidget...");
   let video_widget = VideoWidget::new();
-  eprintln!("VideoWidget created");
 
   // Create a stack to switch between album art and video
   let media_stack = Stack::new();
