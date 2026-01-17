@@ -3,11 +3,14 @@ mod grid_cell;
 mod gtk_helpers;
 mod header_bar;
 mod load_css;
+mod mpv_player;
 mod playback_controller;
 mod playlist_manager;
 mod playlist_view;
 mod preferences_dialog;
 mod settings;
+mod youtube;
+mod youtube_add_dialog;
 
 use adw::prelude::*;
 use adw::Application;
@@ -210,11 +213,13 @@ fn app_main(application: &Application) {
   let playlist_view = create_playlist_view(
     playlist_store.clone(),
     Rc::clone(&playback_controller),
+    Rc::clone(&settings),
   );
   let playlist_mgr_view = create_playlist_manager(
     &playlist_mgr_store,
     playlist_store.clone(),
     Rc::clone(&tracks),
+    Rc::clone(&playback_controller),
   );
   let facet_box = create_facet_box(playlist_store, facet_store, filter, &tracks);
 

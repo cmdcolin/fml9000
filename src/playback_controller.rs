@@ -1,7 +1,8 @@
 use crate::gtk_helpers::str_or_unknown;
+use crate::mpv_player::MpvPlayer;
 use crate::AudioPlayer;
 use fml9000::add_track_to_recently_played;
-use fml9000::models::Track;
+use fml9000::models::{Track, YouTubeVideo};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
@@ -14,10 +15,26 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum PlaybackSource {
+  #[default]
+  None,
+  Local,
+  YouTube,
+}
+
+#[derive(Clone)]
+pub enum PlayableItem {
+  LocalTrack(Rc<Track>),
+  YouTubeVideo(Rc<YouTubeVideo>),
+}
+
 pub struct PlaybackController {
   audio: AudioPlayer,
+  mpv: Rc<MpvPlayer>,
   playlist_store: ListStore,
   current_index: Cell<Option<u32>>,
+  playback_source: Cell<PlaybackSource>,
   album_art: Rc<Image>,
   window: Rc<ApplicationWindow>,
 }
@@ -31,8 +48,10 @@ impl PlaybackController {
   ) -> Rc<Self> {
     Rc::new(Self {
       audio,
+      mpv: MpvPlayer::new(),
       playlist_store,
       current_index: Cell::new(None),
+      playback_source: Cell::new(PlaybackSource::None),
       album_art,
       window,
     })
@@ -72,6 +91,8 @@ impl PlaybackController {
   }
 
   pub fn play_index(&self, index: u32) -> bool {
+    self.mpv.stop();
+
     let Some(track) = self.get_track_at(index) else {
       return false;
     };
@@ -111,6 +132,7 @@ impl PlaybackController {
     let duration = source.total_duration();
     self.audio.play_source(source, duration);
     self.current_index.set(Some(index));
+    self.playback_source.set(PlaybackSource::Local);
     add_track_to_recently_played(&filename);
 
     let mut cover_path = PathBuf::from(&filename);
@@ -126,6 +148,36 @@ impl PlaybackController {
     )));
 
     true
+  }
+
+  pub fn play_youtube_video(&self, video: &YouTubeVideo, audio_only: bool) {
+    self.audio.stop();
+    self.playback_source.set(PlaybackSource::YouTube);
+
+    if audio_only {
+      self.mpv.play_audio(&video.video_id);
+    } else {
+      self.mpv.play_video(&video.video_id);
+    }
+
+    self.window.set_title(Some(&format!(
+      "fml9000 // YouTube - {}",
+      video.title,
+    )));
+  }
+
+  pub fn playback_source(&self) -> PlaybackSource {
+    self.playback_source.get()
+  }
+
+  pub fn mpv(&self) -> &Rc<MpvPlayer> {
+    &self.mpv
+  }
+
+  pub fn stop(&self) {
+    self.audio.stop();
+    self.mpv.stop();
+    self.playback_source.set(PlaybackSource::None);
   }
 
   pub fn play_next(&self) -> bool {

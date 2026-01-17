@@ -25,6 +25,14 @@ where
   }
 }
 
+fn default_true() -> bool {
+  true
+}
+
+fn default_fetch_limit() -> usize {
+  100
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FmlSettings {
   #[serde(default, deserialize_with = "deserialize_folders", alias = "folder")]
@@ -33,6 +41,10 @@ pub struct FmlSettings {
   pub volume: f64,
   #[serde(default)]
   pub rescan_on_startup: bool,
+  #[serde(default = "default_true")]
+  pub youtube_audio_only: bool,
+  #[serde(default = "default_fetch_limit")]
+  pub youtube_fetch_limit: usize,
 }
 
 impl Default for FmlSettings {
@@ -41,6 +53,8 @@ impl Default for FmlSettings {
       folders: Vec::new(),
       volume: 1.0,
       rescan_on_startup: false,
+      youtube_audio_only: true,
+      youtube_fetch_limit: 100,
     }
   }
 }

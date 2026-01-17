@@ -3,7 +3,7 @@ pub mod models;
 pub mod schema;
 
 use self::models::*;
-use self::schema::tracks;
+use self::schema::{tracks, youtube_channels, youtube_videos};
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
@@ -185,4 +185,102 @@ pub fn load_facet_store(rows: &[Rc<Track>], facet_store: &gio::ListStore) {
   for uniq in v {
     facet_store.append(&BoxedAnyObject::new(uniq))
   }
+}
+
+pub fn add_youtube_channel(
+  channel_id: &str,
+  name: &str,
+  handle: Option<&str>,
+  url: &str,
+  thumbnail_url: Option<&str>,
+) -> Result<i32, String> {
+  use self::models::NewYouTubeChannel;
+
+  let mut conn = connect_db()?;
+
+  diesel::insert_into(youtube_channels::table)
+    .values(NewYouTubeChannel {
+      channel_id,
+      name,
+      handle,
+      url,
+      thumbnail_url,
+    })
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to insert channel: {e}"))?;
+
+  youtube_channels::table
+    .filter(youtube_channels::channel_id.eq(channel_id))
+    .select(youtube_channels::id)
+    .first::<i32>(&mut conn)
+    .map_err(|e| format!("Failed to get channel id: {e}"))
+}
+
+pub fn get_youtube_channels() -> Result<Vec<Rc<models::YouTubeChannel>>, String> {
+  use self::models::YouTubeChannel;
+
+  let mut conn = connect_db()?;
+
+  youtube_channels::table
+    .load::<YouTubeChannel>(&mut conn)
+    .map(|v| v.into_iter().map(Rc::new).collect())
+    .map_err(|e| format!("Failed to load channels: {e}"))
+}
+
+pub fn delete_youtube_channel(id: i32) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  diesel::delete(youtube_channels::table.filter(youtube_channels::id.eq(id)))
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to delete channel: {e}"))?;
+
+  Ok(())
+}
+
+pub fn add_youtube_videos(
+  db_channel_id: i32,
+  videos: &[(String, String, Option<i32>, Option<String>, Option<chrono::NaiveDateTime>)],
+) -> Result<(), String> {
+  use self::models::NewYouTubeVideo;
+
+  let mut conn = connect_db()?;
+
+  for (video_id, title, duration, thumbnail, published_at) in videos {
+    let _ = diesel::insert_or_ignore_into(youtube_videos::table)
+      .values(NewYouTubeVideo {
+        video_id,
+        channel_id: db_channel_id,
+        title,
+        duration_seconds: *duration,
+        thumbnail_url: thumbnail.as_deref(),
+        published_at: *published_at,
+      })
+      .execute(&mut conn);
+  }
+
+  Ok(())
+}
+
+pub fn get_videos_for_channel(db_channel_id: i32) -> Result<Vec<Rc<models::YouTubeVideo>>, String> {
+  use self::models::YouTubeVideo;
+
+  let mut conn = connect_db()?;
+
+  youtube_videos::table
+    .filter(youtube_videos::channel_id.eq(db_channel_id))
+    .order(youtube_videos::published_at.desc())
+    .load::<YouTubeVideo>(&mut conn)
+    .map(|v| v.into_iter().map(Rc::new).collect())
+    .map_err(|e| format!("Failed to load videos: {e}"))
+}
+
+pub fn update_channel_last_fetched(id: i32) -> Result<(), String> {
+  let mut conn = connect_db()?;
+
+  diesel::update(youtube_channels::table.filter(youtube_channels::id.eq(id)))
+    .set(youtube_channels::last_fetched.eq(diesel::dsl::now))
+    .execute(&mut conn)
+    .map_err(|e| format!("Failed to update last_fetched: {e}"))?;
+
+  Ok(())
 }
