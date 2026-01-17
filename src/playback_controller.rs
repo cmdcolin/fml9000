@@ -3,10 +3,13 @@ use crate::mpv_player::MpvPlayer;
 use crate::AudioPlayer;
 use fml9000::add_track_to_recently_played;
 use fml9000::models::{Track, YouTubeVideo};
+use gtk::gdk;
 use gtk::gio::ListStore;
-use gtk::glib::BoxedAnyObject;
+use gtk::glib::{Bytes, BoxedAnyObject};
 use gtk::prelude::*;
-use gtk::{AlertDialog, ApplicationWindow, Image};
+use gtk::{AlertDialog, ApplicationWindow, Picture};
+use lofty::file::TaggedFileExt;
+use lofty::probe::Probe;
 use rodio::source::Source;
 use rodio::Decoder;
 use std::cell::Cell;
@@ -35,7 +38,7 @@ pub struct PlaybackController {
   playlist_store: ListStore,
   current_index: Cell<Option<u32>>,
   playback_source: Cell<PlaybackSource>,
-  album_art: Rc<Image>,
+  album_art: Rc<Picture>,
   window: Rc<ApplicationWindow>,
 }
 
@@ -43,7 +46,7 @@ impl PlaybackController {
   pub fn new(
     audio: AudioPlayer,
     playlist_store: ListStore,
-    album_art: Rc<Image>,
+    album_art: Rc<Picture>,
     window: Rc<ApplicationWindow>,
   ) -> Rc<Self> {
     Rc::new(Self {
@@ -135,10 +138,12 @@ impl PlaybackController {
     self.playback_source.set(PlaybackSource::Local);
     add_track_to_recently_played(&filename);
 
-    let mut cover_path = PathBuf::from(&filename);
-    cover_path.pop();
-    cover_path.push("cover.jpg");
-    self.album_art.set_from_file(Some(cover_path));
+    if !self.try_set_embedded_cover_art(&filename) {
+      let mut cover_path = PathBuf::from(&filename);
+      cover_path.pop();
+      cover_path.push("cover.jpg");
+      self.album_art.set_filename(Some(cover_path));
+    }
 
     self.window.set_title(Some(&format!(
       "fml9000 // {} - {} - {}",
@@ -148,6 +153,32 @@ impl PlaybackController {
     )));
 
     true
+  }
+
+  fn try_set_embedded_cover_art(&self, filename: &str) -> bool {
+    let Ok(probe) = Probe::open(filename) else {
+      return false;
+    };
+    let Ok(tagged_file) = probe.read() else {
+      return false;
+    };
+
+    let tag = tagged_file
+      .primary_tag()
+      .or_else(|| tagged_file.first_tag());
+
+    if let Some(t) = tag {
+      let pictures = t.pictures();
+      if let Some(picture) = pictures.first() {
+        let data = picture.data().to_vec();
+        let bytes = Bytes::from_owned(data);
+        if let Ok(texture) = gdk::Texture::from_bytes(&bytes) {
+          self.album_art.set_paintable(Some(&texture));
+          return true;
+        }
+      }
+    }
+    false
   }
 
   pub fn play_youtube_video(&self, video: &YouTubeVideo, audio_only: bool) {

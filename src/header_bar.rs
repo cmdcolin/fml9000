@@ -93,18 +93,15 @@ pub fn create_header_bar(
   });
 
   let is_seeking_for_press = Rc::clone(&is_seeking);
+  let is_seeking_for_release = Rc::clone(&is_seeking);
   let gesture = gtk::GestureClick::new();
   gesture.connect_pressed(move |_, _, _, _| {
     is_seeking_for_press.set(true);
   });
-  seek_slider.add_controller(gesture);
-
-  let is_seeking_for_release = Rc::clone(&is_seeking);
-  let gesture_release = gtk::GestureClick::new();
-  gesture_release.connect_released(move |_, _, _, _| {
+  gesture.connect_end(move |_, _| {
     is_seeking_for_release.set(false);
   });
-  seek_slider.add_controller(gesture_release);
+  seek_slider.add_controller(gesture);
 
   let seek_adjustment_for_timer = seek_adjustment.clone();
   let is_seeking_for_timer = Rc::clone(&is_seeking);

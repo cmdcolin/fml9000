@@ -19,7 +19,7 @@ use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan_folde
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::gdk::Key;
-use gtk::{AlertDialog, ApplicationWindow, CustomFilter, EventControllerKey, Image, Orientation, Paned};
+use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Orientation, Paned, Picture};
 use header_bar::create_header_bar;
 use playback_controller::PlaybackController;
 use playlist_manager::create_playlist_manager;
@@ -180,10 +180,12 @@ fn main() {
 fn app_main(application: &Application) {
   load_css::load_css();
 
+  let settings = Rc::new(RefCell::new(crate::settings::read_settings()));
+
   let window = Rc::new(
     ApplicationWindow::builder()
-      .default_width(1200)
-      .default_height(600)
+      .default_width(settings.borrow().window_width)
+      .default_height(settings.borrow().window_height)
       .application(application)
       .title("fml9000")
       .build(),
@@ -193,8 +195,6 @@ fn app_main(application: &Application) {
   if let Some(e) = audio_error {
     show_error_dialog(&window, "Audio Error", &format!("{e}\n\nPlayback will be disabled."));
   }
-
-  let settings = Rc::new(RefCell::new(crate::settings::read_settings()));
 
   let tracks = match load_tracks() {
     Ok(t) => Rc::new(t),
@@ -213,7 +213,12 @@ fn app_main(application: &Application) {
   let playlist_store = ListStore::new::<BoxedAnyObject>();
   let playlist_mgr_store = ListStore::new::<BoxedAnyObject>();
   let facet_store = ListStore::new::<BoxedAnyObject>();
-  let album_art = Rc::new(Image::builder().vexpand(true).build());
+  let album_art = Picture::builder()
+    .vexpand(true)
+    .hexpand(true)
+    .content_fit(ContentFit::Contain)
+    .build();
+  let album_art = Rc::new(album_art);
 
   load_playlist_store(tracks.iter(), &playlist_store);
   load_facet_store(&tracks, &facet_store);
@@ -262,6 +267,19 @@ fn app_main(application: &Application) {
     .end_child(&right_pane)
     .build();
 
+  {
+    let s = settings.borrow();
+    if s.main_pane_position > 0 {
+      main_pane.set_position(s.main_pane_position);
+    }
+    if s.left_pane_position > 0 {
+      left_pane.set_position(s.left_pane_position);
+    }
+    if s.right_pane_position > 0 {
+      right_pane.set_position(s.right_pane_position);
+    }
+  }
+
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
   let header = create_header_bar(
     Rc::clone(&settings),
@@ -305,5 +323,21 @@ fn app_main(application: &Application) {
   window.add_controller(key_controller);
 
   window.set_child(Some(&main_ui));
+
+  let settings_for_close = Rc::clone(&settings);
+  let window_for_close = Rc::clone(&window);
+  window.connect_close_request(move |_| {
+    let mut s = settings_for_close.borrow_mut();
+    s.window_width = window_for_close.width();
+    s.window_height = window_for_close.height();
+    s.main_pane_position = main_pane.position();
+    s.left_pane_position = left_pane.position();
+    s.right_pane_position = right_pane.position();
+    if let Err(e) = crate::settings::write_settings(&s) {
+      eprintln!("Failed to save layout settings: {e}");
+    }
+    gtk::glib::Propagation::Proceed
+  });
+
   window.present();
 }
