@@ -232,6 +232,41 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
   });
 
+  let last_played = create_column(Rc::clone(&settings), |item| match item {
+    PlaylistItem::Track(r) => format_date(r.last_played),
+    PlaylistItem::Video(_) => String::new(),
+  });
+
+  let last_played_sorter = create_sorter(|item| match item {
+    PlaylistItem::Track(r) => format_date(r.last_played),
+    PlaylistItem::Video(_) => String::new(),
+  });
+
+  let play_count = create_column(Rc::clone(&settings), |item| match item {
+    PlaylistItem::Track(r) => {
+      if r.play_count > 0 {
+        r.play_count.to_string()
+      } else {
+        String::new()
+      }
+    }
+    PlaylistItem::Video(_) => String::new(),
+  });
+
+  let play_count_sorter = CustomSorter::new(move |obj1, obj2| {
+    let get_count = |obj: &gtk::glib::Object| -> i32 {
+      obj
+        .downcast_ref::<BoxedAnyObject>()
+        .and_then(|o| try_get_item(o))
+        .map(|item| match item {
+          PlaylistItem::Track(r) => r.play_count,
+          PlaylistItem::Video(_) => 0,
+        })
+        .unwrap_or(0)
+    };
+    get_count(obj1).cmp(&get_count(obj2)).into()
+  });
+
   let playlist_col1 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
@@ -277,6 +312,24 @@ pub fn create_playlist_view(
     .sorter(&date_sorter)
     .build();
 
+  let last_played_col = ColumnViewColumn::builder()
+    .expand(false)
+    .resizable(true)
+    .fixed_width(100)
+    .title("Last Played")
+    .factory(&last_played)
+    .sorter(&last_played_sorter)
+    .build();
+
+  let play_count_col = ColumnViewColumn::builder()
+    .expand(false)
+    .resizable(true)
+    .fixed_width(50)
+    .title("Plays")
+    .factory(&play_count)
+    .sorter(&play_count_sorter)
+    .build();
+
   let playlist_col5 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
@@ -291,6 +344,8 @@ pub fn create_playlist_view(
   playlist_columnview.append_column(&duration_col);
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
+  playlist_columnview.append_column(&last_played_col);
+  playlist_columnview.append_column(&play_count_col);
   playlist_columnview.append_column(&playlist_col5);
 
   // Bind ColumnView sorter to the SortListModel

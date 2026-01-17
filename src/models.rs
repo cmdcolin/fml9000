@@ -14,6 +14,8 @@ pub struct Track {
   pub track: Option<String>,
   pub added: Option<NaiveDateTime>,
   pub duration_seconds: Option<i32>,
+  pub play_count: i32,
+  pub last_played: Option<NaiveDateTime>,
 }
 
 #[derive(Queryable)]

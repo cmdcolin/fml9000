@@ -61,9 +61,9 @@ pub fn create_facet_box(
 
   facet_selection.connect_selection_changed(move |_, _, _| {
     let bitset = facet_selection_for_handler.selection();
-    if let Some((iter, first_pos)) = gtk::BitsetIter::init_first(&bitset) {
-      playlist_store_for_handler.remove_all();
+    playlist_store_for_handler.remove_all();
 
+    if let Some((iter, first_pos)) = gtk::BitsetIter::init_first(&bitset) {
       // Collect all selected facets and check for "(All)"
       let mut selected_facets = Vec::new();
       let mut has_all = false;
@@ -97,6 +97,8 @@ pub fn create_facet_box(
         });
         load_playlist_store(matching, &playlist_store_for_handler);
       }
+    } else {
+      load_playlist_store(tracks_for_handler.iter(), &playlist_store_for_handler);
     }
   });
 

@@ -37,6 +37,8 @@ diesel::table! {
         track -> Nullable<Text>,
         added -> Nullable<Timestamp>,
         duration_seconds -> Nullable<Integer>,
+        play_count -> Integer,
+        last_played -> Nullable<Timestamp>,
     }
 }
 

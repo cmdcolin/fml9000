@@ -259,6 +259,20 @@ pub fn add_track_to_recently_played(path: &str) {
     .execute(&mut conn);
 }
 
+pub fn update_track_play_stats(path: &str) {
+  use self::schema::tracks::dsl;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+  let _ = diesel::update(dsl::tracks.filter(dsl::filename.eq(path)))
+    .set((
+      dsl::play_count.eq(dsl::play_count + 1),
+      dsl::last_played.eq(diesel::dsl::now),
+    ))
+    .execute(&mut conn);
+}
+
 pub fn load_recently_played(limit: i64) -> Vec<Rc<Track>> {
   use self::schema::recently_played::dsl as rp;
   use self::schema::tracks::dsl as t;

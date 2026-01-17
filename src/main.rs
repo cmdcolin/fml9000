@@ -10,6 +10,7 @@ mod playlist_manager;
 mod playlist_view;
 mod preferences_dialog;
 mod settings;
+mod video_widget;
 mod youtube;
 mod youtube_add_dialog;
 
@@ -20,7 +21,8 @@ use fml9000::{load_facet_store, load_playlist_store, load_tracks};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::gdk::Key;
-use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Orientation, Paned, Picture};
+use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Orientation, Paned, Picture, Stack};
+use video_widget::VideoWidget;
 use header_bar::create_header_bar;
 use playback_controller::PlaybackController;
 use playlist_manager::create_playlist_manager;
@@ -225,6 +227,20 @@ fn app_main(application: &Application) {
     .build();
   let album_art = Rc::new(album_art);
 
+  // Create video widget for embedded GStreamer playback
+  eprintln!("About to create VideoWidget...");
+  let video_widget = VideoWidget::new();
+  eprintln!("VideoWidget created");
+
+  // Create a stack to switch between album art and video
+  let media_stack = Stack::new();
+  media_stack.add_named(&*album_art, Some("album_art"));
+  media_stack.add_named(video_widget.widget(), Some("video"));
+  media_stack.set_visible_child_name("album_art");
+  media_stack.set_vexpand(true);
+  media_stack.set_hexpand(true);
+  let media_stack = Rc::new(media_stack);
+
   load_playlist_store(tracks.iter(), &playlist_store);
   load_facet_store(&tracks, &facet_store);
 
@@ -232,6 +248,8 @@ fn app_main(application: &Application) {
     audio.clone(),
     playlist_store.clone(),
     Rc::clone(&album_art),
+    Rc::clone(&video_widget),
+    Rc::clone(&media_stack),
     Rc::clone(&window),
   );
 
@@ -281,7 +299,7 @@ fn app_main(application: &Application) {
     .vexpand(true)
     .orientation(Orientation::Vertical)
     .start_child(&playlist_mgr_view)
-    .end_child(&*album_art)
+    .end_child(&*media_stack)
     .build();
 
   let main_pane = Paned::builder()

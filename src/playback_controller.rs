@@ -1,13 +1,13 @@
 use crate::gtk_helpers::str_or_unknown;
-use crate::mpv_player::MpvPlayer;
+use crate::video_widget::VideoWidget;
 use crate::AudioPlayer;
-use fml9000::add_track_to_recently_played;
+use fml9000::{add_track_to_recently_played, update_track_play_stats};
 use fml9000::models::{Track, YouTubeVideo};
 use gtk::gdk;
 use gtk::gio::ListStore;
 use gtk::glib::{Bytes, BoxedAnyObject};
 use gtk::prelude::*;
-use gtk::{AlertDialog, ApplicationWindow, Picture};
+use gtk::{AlertDialog, ApplicationWindow, Picture, Stack};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
 use rodio::source::Source;
@@ -34,7 +34,8 @@ enum PlayableItem {
 
 pub struct PlaybackController {
   audio: AudioPlayer,
-  mpv: Rc<MpvPlayer>,
+  video_widget: Rc<VideoWidget>,
+  media_stack: Rc<Stack>,
   playlist_store: ListStore,
   current_index: Cell<Option<u32>>,
   playback_source: Cell<PlaybackSource>,
@@ -47,11 +48,14 @@ impl PlaybackController {
     audio: AudioPlayer,
     playlist_store: ListStore,
     album_art: Rc<Picture>,
+    video_widget: Rc<VideoWidget>,
+    media_stack: Rc<Stack>,
     window: Rc<ApplicationWindow>,
   ) -> Rc<Self> {
     Rc::new(Self {
       audio,
-      mpv: MpvPlayer::new(),
+      video_widget,
+      media_stack,
       playlist_store,
       current_index: Cell::new(None),
       playback_source: Cell::new(PlaybackSource::None),
@@ -115,7 +119,8 @@ impl PlaybackController {
   }
 
   fn play_track(&self, index: u32, track: &Track) -> bool {
-    self.mpv.stop();
+    self.video_widget.stop();
+    self.media_stack.set_visible_child_name("album_art");
 
     let filename = track.filename.clone();
     let artist = track.artist.clone();
@@ -154,6 +159,7 @@ impl PlaybackController {
     self.current_index.set(Some(index));
     self.playback_source.set(PlaybackSource::Local);
     add_track_to_recently_played(&filename);
+    update_track_play_stats(&filename);
 
     if !self.try_set_embedded_cover_art(&filename) {
       let mut cover_path = PathBuf::from(&filename);
@@ -198,15 +204,11 @@ impl PlaybackController {
     false
   }
 
-  pub fn play_youtube_video(&self, video: &YouTubeVideo, audio_only: bool) {
+  pub fn play_youtube_video(&self, video: &YouTubeVideo, _audio_only: bool) {
     self.audio.stop();
     self.playback_source.set(PlaybackSource::YouTube);
-
-    if audio_only {
-      self.mpv.play_audio(&video.video_id);
-    } else {
-      self.mpv.play_video(&video.video_id);
-    }
+    self.media_stack.set_visible_child_name("video");
+    self.video_widget.play_youtube(&video.video_id);
 
     self.window.set_title(Some(&format!(
       "fml9000 // YouTube - {}",
@@ -218,13 +220,14 @@ impl PlaybackController {
     self.playback_source.get()
   }
 
-  pub fn mpv(&self) -> &Rc<MpvPlayer> {
-    &self.mpv
+  pub fn video_widget(&self) -> &Rc<VideoWidget> {
+    &self.video_widget
   }
 
   pub fn stop(&self) {
     self.audio.stop();
-    self.mpv.stop();
+    self.video_widget.stop();
+    self.media_stack.set_visible_child_name("album_art");
     self.playback_source.set(PlaybackSource::None);
   }
 

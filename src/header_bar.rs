@@ -93,9 +93,9 @@ pub fn create_header_bar(
           }
         }
         PlaybackSource::YouTube => {
-          if let Some(duration) = pc_for_seek.mpv().get_duration() {
+          if let Some(duration) = pc_for_seek.video_widget().get_duration() {
             let pos_secs = adj.value() * duration.as_secs_f64();
-            pc_for_seek.mpv().seek(Duration::from_secs_f64(pos_secs));
+            pc_for_seek.video_widget().seek(Duration::from_secs_f64(pos_secs));
           }
         }
         PlaybackSource::None => {}
@@ -157,10 +157,10 @@ pub fn create_header_bar(
         }
       }
       PlaybackSource::YouTube => {
-        if let Some(duration) = pc_for_timer.mpv().get_duration() {
+        if let Some(duration) = pc_for_timer.video_widget().get_duration() {
           let duration_secs = duration.as_secs_f64();
           if duration_secs > 1.0 {
-            if let Some(pos) = pc_for_timer.mpv().get_time_pos() {
+            if let Some(pos) = pc_for_timer.video_widget().get_time_pos() {
               let pos_secs = pos.as_secs_f64();
 
               // Only update if position is valid (not beyond duration)
@@ -177,10 +177,10 @@ pub fn create_header_bar(
           }
         }
 
-        if was_playing_for_timer.get() && !pc_for_timer.mpv().is_playing() {
+        if was_playing_for_timer.get() && !pc_for_timer.video_widget().is_playing() {
           was_playing_for_timer.set(false);
           pc_for_timer.play_next();
-        } else if pc_for_timer.mpv().is_playing() {
+        } else if pc_for_timer.video_widget().is_playing() {
           was_playing_for_timer.set(true);
         }
       }
@@ -205,7 +205,7 @@ pub fn create_header_bar(
   volume_button.connect_value_changed(move |_, volume| {
     pc_for_volume.audio().set_volume(volume as f32);
     if pc_for_volume.playback_source() == PlaybackSource::YouTube {
-      pc_for_volume.mpv().set_volume(volume * 100.0);
+      pc_for_volume.video_widget().set_volume(volume * 100.0);
     }
     let mut s = settings_for_volume.borrow_mut();
     s.volume = volume;
@@ -229,7 +229,7 @@ pub fn create_header_bar(
   pause_btn.connect_clicked(move |_| {
     match pc_for_pause.playback_source() {
       PlaybackSource::Local => pc_for_pause.audio().pause(),
-      PlaybackSource::YouTube => pc_for_pause.mpv().pause(),
+      PlaybackSource::YouTube => pc_for_pause.video_widget().pause(),
       PlaybackSource::None => {}
     }
   });
@@ -237,7 +237,7 @@ pub fn create_header_bar(
   play_btn.connect_clicked(move |_| {
     match pc_for_play.playback_source() {
       PlaybackSource::Local => pc_for_play.audio().play(),
-      PlaybackSource::YouTube => pc_for_play.mpv().unpause(),
+      PlaybackSource::YouTube => pc_for_play.video_widget().unpause(),
       PlaybackSource::None => {}
     }
   });
