@@ -13,6 +13,7 @@ pub struct Track {
   pub album_artist: Option<String>,
   pub track: Option<String>,
   pub added: Option<NaiveDateTime>,
+  pub duration_seconds: Option<i32>,
 }
 
 #[derive(Queryable)]
@@ -31,6 +32,7 @@ pub struct NewTrack<'a> {
   pub genre: Option<&'a str>,
   pub track: Option<&'a str>,
   pub album_artist: Option<&'a str>,
+  pub duration_seconds: Option<i32>,
 }
 
 #[derive(Insertable)]

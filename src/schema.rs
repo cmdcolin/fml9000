@@ -36,6 +36,7 @@ diesel::table! {
         album_artist -> Nullable<Text>,
         track -> Nullable<Text>,
         added -> Nullable<Timestamp>,
+        duration_seconds -> Nullable<Integer>,
     }
 }
 

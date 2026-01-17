@@ -2,12 +2,15 @@ use crate::playback_controller::PlaybackController;
 use crate::settings::{write_settings, FmlSettings, RowHeight};
 use adw::prelude::*;
 use fml9000::models::Track;
-use fml9000::run_scan_folders;
+use fml9000::{run_scan_with_progress, ScanProgress};
 use gtk::gio;
 use gtk::gio::ListStore;
+use gtk::glib;
 use gtk::FileDialog;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 fn refresh_store(store: &ListStore) {
   // Collect all items, clear, and re-add to force complete rebind
@@ -278,15 +281,140 @@ pub async fn dialog(
 
   let settings_for_rescan = Rc::clone(&settings);
   let tracks_for_rescan = Rc::clone(&tracks);
+  let prefs_window_for_rescan = preferences_window.clone();
   rescan_button.connect_clicked(move |btn| {
     btn.set_sensitive(false);
-    btn.set_label("Scanning...");
 
     let folders = settings_for_rescan.borrow().folders.clone();
-    run_scan_folders(&folders, &tracks_for_rescan);
+    if folders.is_empty() {
+      btn.set_sensitive(true);
+      return;
+    }
 
-    btn.set_label("Rescan Now");
-    btn.set_sensitive(true);
+    // Collect existing filenames - separate complete (has duration) from incomplete
+    let mut existing_complete: HashSet<String> = HashSet::new();
+    let mut existing_incomplete: HashSet<String> = HashSet::new();
+    for track in tracks_for_rescan.iter() {
+      if track.duration_seconds.is_some() {
+        existing_complete.insert(track.filename.clone());
+      } else {
+        existing_incomplete.insert(track.filename.clone());
+      }
+    }
+
+    // Create progress dialog
+    let progress_dialog = gtk::Window::builder()
+      .title("Scanning Library")
+      .modal(true)
+      .transient_for(&prefs_window_for_rescan)
+      .default_width(450)
+      .default_height(150)
+      .resizable(false)
+      .deletable(false)
+      .build();
+
+    let content = gtk::Box::builder()
+      .orientation(gtk::Orientation::Vertical)
+      .spacing(12)
+      .margin_top(24)
+      .margin_bottom(24)
+      .margin_start(24)
+      .margin_end(24)
+      .build();
+
+    let status_label = gtk::Label::builder()
+      .label("Starting scan...")
+      .xalign(0.0)
+      .wrap(true)
+      .build();
+
+    let progress_bar = gtk::ProgressBar::builder()
+      .show_text(true)
+      .build();
+    progress_bar.set_text(Some("Scanning..."));
+
+    let file_label = gtk::Label::builder()
+      .label("")
+      .xalign(0.0)
+      .ellipsize(gtk::pango::EllipsizeMode::Middle)
+      .css_classes(["dim-label"])
+      .build();
+
+    content.append(&status_label);
+    content.append(&progress_bar);
+    content.append(&file_label);
+
+    progress_dialog.set_child(Some(&content));
+    progress_dialog.present();
+
+    // Create channel for progress updates
+    let (tx, rx) = mpsc::channel::<ScanProgress>();
+
+    // Spawn background thread for scanning
+    std::thread::spawn(move || {
+      run_scan_with_progress(folders, existing_complete, existing_incomplete, tx);
+    });
+
+    // Set up periodic check for progress updates
+    let btn_clone = btn.clone();
+    let dialog_clone = progress_dialog.clone();
+    let status_label_clone = status_label.clone();
+    let progress_bar_clone = progress_bar.clone();
+    let file_label_clone = file_label.clone();
+
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+      while let Ok(progress) = rx.try_recv() {
+        match progress {
+          ScanProgress::StartingFolder(folder) => {
+            status_label_clone.set_label(&format!("Scanning: {}", folder));
+          }
+          ScanProgress::FoundFile(found, skipped, file) => {
+            progress_bar_clone.pulse();
+            progress_bar_clone.set_text(Some(&format!("Found {} files ({} existing)...", found, skipped)));
+            if let Some(name) = std::path::Path::new(&file).file_name() {
+              file_label_clone.set_label(&name.to_string_lossy());
+            }
+          }
+          ScanProgress::ScannedFile(found, skipped, added, updated, file) => {
+            if updated > 0 {
+              progress_bar_clone.set_text(Some(&format!("{} files, {} skip, {} new, {} updated", found, skipped, added, updated)));
+            } else {
+              progress_bar_clone.set_text(Some(&format!("{} files, {} existing, {} new", found, skipped, added)));
+            }
+            if let Some(name) = std::path::Path::new(&file).file_name() {
+              file_label_clone.set_label(&name.to_string_lossy());
+            }
+          }
+          ScanProgress::Complete(found, skipped, added, updated) => {
+            if updated > 0 {
+              status_label_clone.set_label(&format!(
+                "Complete: {} found, {} existing, {} added, {} updated",
+                found, skipped, added, updated
+              ));
+            } else {
+              status_label_clone.set_label(&format!(
+                "Complete: {} found, {} existing, {} added",
+                found, skipped, added
+              ));
+            }
+            progress_bar_clone.set_fraction(1.0);
+            progress_bar_clone.set_text(Some("Complete"));
+            file_label_clone.set_label("");
+
+            // Close dialog after a short delay
+            let dialog = dialog_clone.clone();
+            let btn = btn_clone.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(2000), move || {
+              dialog.close();
+              btn.set_sensitive(true);
+            });
+
+            return glib::ControlFlow::Break;
+          }
+        }
+      }
+      glib::ControlFlow::Continue
+    });
   });
 
   let settings_for_toggle = Rc::clone(&settings);

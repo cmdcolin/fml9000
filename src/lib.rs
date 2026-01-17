@@ -10,7 +10,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use directories::ProjectDirs;
 use gtk::gio;
 use gtk::glib::BoxedAnyObject;
-use lofty::file::TaggedFileExt;
+use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::Accessor;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
@@ -98,6 +98,13 @@ pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
         .or_else(|| tagged_file.first_tag());
 
       if let Some(t) = tag {
+        let duration_seconds = tagged_file
+          .properties()
+          .duration()
+          .as_secs()
+          .try_into()
+          .ok();
+
         let _ = diesel::insert_into(tracks::table)
           .values(NewTrack {
             filename: &path_str,
@@ -107,6 +114,7 @@ pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
             title: t.title().as_deref(),
             track: t.get_string(&ItemKey::TrackNumber),
             genre: t.genre().as_deref(),
+            duration_seconds,
           })
           .execute(&mut conn);
       }
@@ -118,6 +126,126 @@ pub fn run_scan_folders(folders: &[String], rows: &[Rc<Track>]) {
   for folder in folders {
     run_scan(folder, rows);
   }
+}
+
+/// Progress update sent during scanning
+#[derive(Clone)]
+pub enum ScanProgress {
+  /// Starting to scan a folder
+  StartingFolder(String),
+  /// Found a file (total_found, skipped, current_file)
+  FoundFile(usize, usize, String),
+  /// Scanned a file (total_found, skipped, added, updated, current_file)
+  ScannedFile(usize, usize, usize, usize, String),
+  /// Scan complete (total_found, skipped, added, updated)
+  Complete(usize, usize, usize, usize),
+}
+
+/// Run scan with progress reporting via a channel
+/// - existing_complete: files that exist and have all metadata (will be skipped)
+/// - existing_incomplete: files that exist but need metadata update (e.g., missing duration)
+pub fn run_scan_with_progress(
+  folders: Vec<String>,
+  existing_complete: std::collections::HashSet<String>,
+  existing_incomplete: std::collections::HashSet<String>,
+  progress_sender: std::sync::mpsc::Sender<ScanProgress>,
+) {
+  use self::schema::tracks::dsl;
+
+  let mut conn = match connect_db() {
+    Ok(c) => c,
+    Err(e) => {
+      eprintln!("Warning: Could not connect to database for scanning: {e}");
+      let _ = progress_sender.send(ScanProgress::Complete(0, 0, 0, 0));
+      return;
+    }
+  };
+
+  let mut total_found = 0;
+  let mut total_skipped = 0;
+  let mut total_added = 0;
+  let mut total_updated = 0;
+
+  for folder in &folders {
+    let _ = progress_sender.send(ScanProgress::StartingFolder(folder.clone()));
+
+    let walker = WalkDir::new(folder)
+      .into_iter()
+      .filter_map(|e| e.ok());
+
+    for entry in walker {
+      if !entry.file_type().is_file() {
+        continue;
+      }
+
+      let path_str = entry.path().display().to_string();
+      total_found += 1;
+
+      let _ = progress_sender.send(ScanProgress::FoundFile(total_found, total_skipped, path_str.clone()));
+
+      // Skip files that are complete
+      if existing_complete.contains(&path_str) {
+        total_skipped += 1;
+        continue;
+      }
+
+      let needs_update = existing_incomplete.contains(&path_str);
+
+      let Ok(probe) = Probe::open(&path_str) else {
+        continue;
+      };
+
+      let Ok(tagged_file) = probe.read() else {
+        continue;
+      };
+
+      let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+
+      if let Some(t) = tag {
+        let duration_seconds: Option<i32> = tagged_file
+          .properties()
+          .duration()
+          .as_secs()
+          .try_into()
+          .ok();
+
+        if needs_update {
+          // Update existing record with duration
+          let result = diesel::update(dsl::tracks.filter(dsl::filename.eq(&path_str)))
+            .set(dsl::duration_seconds.eq(duration_seconds))
+            .execute(&mut conn);
+
+          if result.is_ok() {
+            total_updated += 1;
+          }
+        } else {
+          // Insert new record
+          let result = diesel::insert_into(tracks::table)
+            .values(NewTrack {
+              filename: &path_str,
+              artist: t.artist().as_deref(),
+              album: t.album().as_deref(),
+              album_artist: t.get_string(&ItemKey::AlbumArtist),
+              title: t.title().as_deref(),
+              track: t.get_string(&ItemKey::TrackNumber),
+              genre: t.genre().as_deref(),
+              duration_seconds,
+            })
+            .execute(&mut conn);
+
+          if result.is_ok() {
+            total_added += 1;
+          }
+        }
+      }
+
+      let _ = progress_sender.send(ScanProgress::ScannedFile(total_found, total_skipped, total_added, total_updated, path_str));
+    }
+  }
+
+  let _ = progress_sender.send(ScanProgress::Complete(total_found, total_skipped, total_added, total_updated));
 }
 
 pub fn add_track_to_recently_played(path: &str) {

@@ -85,9 +85,20 @@ pub fn create_header_bar(
   let is_seeking_for_change = Rc::clone(&is_seeking);
   seek_adjustment.connect_value_changed(move |adj| {
     if is_seeking_for_change.get() {
-      if let Some(duration) = pc_for_seek.audio().get_duration() {
-        let pos_secs = adj.value() * duration.as_secs_f64();
-        pc_for_seek.audio().try_seek(Duration::from_secs_f64(pos_secs));
+      match pc_for_seek.playback_source() {
+        PlaybackSource::Local => {
+          if let Some(duration) = pc_for_seek.audio().get_duration() {
+            let pos_secs = adj.value() * duration.as_secs_f64();
+            pc_for_seek.audio().try_seek(Duration::from_secs_f64(pos_secs));
+          }
+        }
+        PlaybackSource::YouTube => {
+          if let Some(duration) = pc_for_seek.mpv().get_duration() {
+            let pos_secs = adj.value() * duration.as_secs_f64();
+            pc_for_seek.mpv().seek(Duration::from_secs_f64(pos_secs));
+          }
+        }
+        PlaybackSource::None => {}
       }
     }
   });
@@ -108,30 +119,65 @@ pub fn create_header_bar(
   let was_playing_for_timer = Rc::clone(&was_playing);
   let time_current_for_timer = time_current.clone();
   let time_total_for_timer = time_total.clone();
+  let last_playback_source: Rc<Cell<PlaybackSource>> = Rc::new(Cell::new(PlaybackSource::None));
   glib::timeout_add_local(Duration::from_millis(250), move || {
-    if pc_for_timer.playback_source() == PlaybackSource::Local {
-      if let Some(duration) = pc_for_timer.audio().get_duration() {
-        let duration_secs = duration.as_secs_f64();
-        if duration_secs > 0.0 {
-          let pos = pc_for_timer.audio().get_pos();
-          let pos_secs = pos.as_secs_f64();
+    let current_source = pc_for_timer.playback_source();
 
-          if !is_seeking_for_timer.get() {
-            let fraction = (pos_secs / duration_secs).clamp(0.0, 1.0);
-            seek_adjustment_for_timer.set_value(fraction);
-          }
+    // Reset seekbar when playback source changes
+    if current_source != last_playback_source.get() {
+      last_playback_source.set(current_source);
+      seek_adjustment_for_timer.set_value(0.0);
+      time_current_for_timer.set_label("0:00");
+      time_total_for_timer.set_label("0:00");
+    }
 
-          time_current_for_timer.set_label(&format_time(pos));
-          time_total_for_timer.set_label(&format_time(duration));
+    match current_source {
+      PlaybackSource::Local => {
+        if let Some(duration) = pc_for_timer.audio().get_duration() {
+          let duration_secs = duration.as_secs_f64();
+          if duration_secs > 0.0 {
+            let pos = pc_for_timer.audio().get_pos();
+            let pos_secs = pos.as_secs_f64();
 
-          if was_playing_for_timer.get() && pc_for_timer.audio().is_empty() {
-            was_playing_for_timer.set(false);
-            pc_for_timer.play_next();
-          } else if !pc_for_timer.audio().is_empty() {
-            was_playing_for_timer.set(true);
+            if !is_seeking_for_timer.get() {
+              let fraction = (pos_secs / duration_secs).clamp(0.0, 1.0);
+              seek_adjustment_for_timer.set_value(fraction);
+            }
+
+            time_current_for_timer.set_label(&format_time(pos));
+            time_total_for_timer.set_label(&format_time(duration));
+
+            if was_playing_for_timer.get() && pc_for_timer.audio().is_empty() {
+              was_playing_for_timer.set(false);
+              pc_for_timer.play_next();
+            } else if !pc_for_timer.audio().is_empty() {
+              was_playing_for_timer.set(true);
+            }
           }
         }
       }
+      PlaybackSource::YouTube => {
+        if let Some(duration) = pc_for_timer.mpv().get_duration() {
+          let duration_secs = duration.as_secs_f64();
+          if duration_secs > 1.0 {
+            if let Some(pos) = pc_for_timer.mpv().get_time_pos() {
+              let pos_secs = pos.as_secs_f64();
+
+              // Only update if position is valid (not beyond duration)
+              if pos_secs >= 0.0 && pos_secs <= duration_secs {
+                if !is_seeking_for_timer.get() {
+                  let fraction = pos_secs / duration_secs;
+                  seek_adjustment_for_timer.set_value(fraction);
+                }
+
+                time_current_for_timer.set_label(&format_time(pos));
+                time_total_for_timer.set_label(&format_time(duration));
+              }
+            }
+          }
+        }
+      }
+      PlaybackSource::None => {}
     }
     ControlFlow::Continue
   });
@@ -171,11 +217,19 @@ pub fn create_header_bar(
   button_box.append(&volume_button);
 
   pause_btn.connect_clicked(move |_| {
-    pc_for_pause.audio().pause();
+    match pc_for_pause.playback_source() {
+      PlaybackSource::Local => pc_for_pause.audio().pause(),
+      PlaybackSource::YouTube => pc_for_pause.mpv().pause(),
+      PlaybackSource::None => {}
+    }
   });
 
   play_btn.connect_clicked(move |_| {
-    pc_for_play.audio().play();
+    match pc_for_play.playback_source() {
+      PlaybackSource::Local => pc_for_play.audio().play(),
+      PlaybackSource::YouTube => pc_for_play.mpv().unpause(),
+      PlaybackSource::None => {}
+    }
   });
 
   let seek_adjustment_for_stop = seek_adjustment.clone();

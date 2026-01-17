@@ -129,7 +129,10 @@ pub fn create_playlist_view(
       str_or_unknown(&r.album),
       str_or_unknown(&r.artist),
     ),
-    PlaylistItem::Video(v) => format!("YouTube // {}", format_duration(v.duration_seconds)),
+    PlaylistItem::Video(v) => {
+      let (artist, album) = parse_youtube_title(&v.title);
+      format!("{} // {}", album, artist)
+    }
   });
 
   let track_num_sorter = CustomSorter::new(move |obj1, obj2| {
@@ -179,12 +182,34 @@ pub fn create_playlist_view(
         str_or_unknown(&r.artist),
       )
     }
-    PlaylistItem::Video(v) => format!("YouTube // {}", format_duration(v.duration_seconds)),
+    PlaylistItem::Video(v) => {
+      let (artist, album) = parse_youtube_title(&v.title);
+      format!("{} // {}", album, artist)
+    }
   });
 
   let track_num = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
     PlaylistItem::Video(_) => String::new(),
+  });
+
+  let duration = create_column(Rc::clone(&settings), |item| match item {
+    PlaylistItem::Track(r) => format_duration(r.duration_seconds),
+    PlaylistItem::Video(v) => format_duration(v.duration_seconds),
+  });
+
+  let duration_sorter = CustomSorter::new(move |obj1, obj2| {
+    let get_duration = |obj: &gtk::glib::Object| -> i32 {
+      obj
+        .downcast_ref::<BoxedAnyObject>()
+        .and_then(|o| try_get_item(o))
+        .map(|item| match item {
+          PlaylistItem::Track(r) => r.duration_seconds.unwrap_or(0),
+          PlaylistItem::Video(v) => v.duration_seconds.unwrap_or(0),
+        })
+        .unwrap_or(0)
+    };
+    get_duration(obj1).cmp(&get_duration(obj2)).into()
   });
 
   let title = create_column(Rc::clone(&settings), |item| match item {
@@ -225,6 +250,15 @@ pub fn create_playlist_view(
     .factory(&track_num)
     .build();
 
+  let duration_col = ColumnViewColumn::builder()
+    .expand(false)
+    .resizable(true)
+    .title("Duration")
+    .fixed_width(60)
+    .sorter(&duration_sorter)
+    .factory(&duration)
+    .build();
+
   let playlist_col3 = ColumnViewColumn::builder()
     .expand(false)
     .resizable(true)
@@ -254,6 +288,7 @@ pub fn create_playlist_view(
 
   playlist_columnview.append_column(&playlist_col1);
   playlist_columnview.append_column(&playlist_col2);
+  playlist_columnview.append_column(&duration_col);
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
   playlist_columnview.append_column(&playlist_col5);
@@ -649,5 +684,35 @@ fn format_duration(seconds: Option<i32>) -> String {
       format!("{mins}:{secs:02}")
     }
     None => "?:??".to_string(),
+  }
+}
+
+/// Parses a YouTube video title to extract artist and album.
+/// Common patterns:
+/// - "Artist - Album [Label]"
+/// - "Artist - Album (Full Album) [Label]"
+/// - "Artist - Album"
+fn parse_youtube_title(title: &str) -> (String, String) {
+  // Try to split on " - " to get artist and the rest
+  if let Some((artist, rest)) = title.split_once(" - ") {
+    // Clean up the album part by removing common suffixes
+    let album = rest
+      .trim()
+      // Remove [Label] or [anything in brackets]
+      .split('[')
+      .next()
+      .unwrap_or(rest)
+      .trim()
+      // Remove (Full Album), (Full Cassette), etc.
+      .trim_end_matches(|c| c == ')' || c == ' ')
+      .split('(')
+      .next()
+      .unwrap_or(rest)
+      .trim();
+
+    (artist.trim().to_string(), album.to_string())
+  } else {
+    // No " - " found, use the whole title as album
+    ("Unknown".to_string(), title.to_string())
   }
 }

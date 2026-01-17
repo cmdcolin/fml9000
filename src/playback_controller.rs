@@ -76,11 +76,21 @@ impl PlaybackController {
     self.playlist_store.n_items()
   }
 
-  fn get_track_at(&self, index: u32) -> Option<Rc<Track>> {
+  fn get_item_at(&self, index: u32) -> Option<PlayableItem> {
     let item = self.playlist_store.item(index)?;
     let obj = item.downcast::<BoxedAnyObject>().ok()?;
-    let borrowed: std::cell::Ref<'_, Rc<Track>> = obj.borrow();
-    Some(borrowed.clone())
+
+    // Try Track first
+    if let Ok(borrowed) = obj.try_borrow::<Rc<Track>>() {
+      return Some(PlayableItem::LocalTrack(borrowed.clone()));
+    }
+
+    // Try YouTubeVideo
+    if let Ok(borrowed) = obj.try_borrow::<Rc<YouTubeVideo>>() {
+      return Some(PlayableItem::YouTubeVideo(borrowed.clone()));
+    }
+
+    None
   }
 
   fn show_error(&self, title: &str, message: &str) {
@@ -94,11 +104,22 @@ impl PlaybackController {
   }
 
   pub fn play_index(&self, index: u32) -> bool {
-    self.mpv.stop();
-
-    let Some(track) = self.get_track_at(index) else {
+    let Some(item) = self.get_item_at(index) else {
       return false;
     };
+
+    match item {
+      PlayableItem::LocalTrack(track) => self.play_track(index, &track),
+      PlayableItem::YouTubeVideo(video) => {
+        self.play_youtube_video(&video, true);
+        self.current_index.set(Some(index));
+        true
+      }
+    }
+  }
+
+  fn play_track(&self, index: u32, track: &Track) -> bool {
+    self.mpv.stop();
 
     let filename = track.filename.clone();
     let artist = track.artist.clone();
