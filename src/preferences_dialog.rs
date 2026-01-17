@@ -1,3 +1,4 @@
+use crate::playback_controller::PlaybackController;
 use crate::settings::{write_settings, FmlSettings};
 use adw::prelude::*;
 use fml9000::models::Track;
@@ -74,11 +75,12 @@ fn rebuild_folder_list(
   }
 }
 
-pub async fn dialog<W: IsA<gtk::Window>>(
-  wnd: Rc<W>,
+pub async fn dialog(
+  playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
   tracks: Rc<Vec<Rc<Track>>>,
 ) {
+  let wnd = playback_controller.window();
   let folder_flowbox = gtk::FlowBox::builder()
     .selection_mode(gtk::SelectionMode::None)
     .homogeneous(false)
@@ -163,7 +165,7 @@ pub async fn dialog<W: IsA<gtk::Window>>(
 
   let preferences_window = adw::PreferencesWindow::builder()
     .title("Preferences")
-    .transient_for(&*wnd)
+    .transient_for(&**wnd)
     .modal(true)
     .build();
   preferences_window.add(&page);

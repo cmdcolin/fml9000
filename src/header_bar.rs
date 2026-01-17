@@ -1,47 +1,109 @@
-use crate::gtk_helpers::{create_button, load_img};
+use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
-use crate::AudioPlayer;
 use adw::prelude::*;
 use fml9000::models::Track;
-use gtk::glib::MainContext;
-use gtk::{Adjustment, Orientation, Scale, ScaleButton};
-use std::cell::RefCell;
+use gtk::glib::{self, ControlFlow, MainContext};
+use gtk::{Adjustment, Button, Orientation, Scale, ScaleButton};
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-
-static PREV_SVG: &[u8] = include_bytes!("img/prev.svg");
-static STOP_SVG: &[u8] = include_bytes!("img/stop.svg");
-static NEXT_SVG: &[u8] = include_bytes!("img/next.svg");
-static PAUSE_SVG: &[u8] = include_bytes!("img/pause.svg");
-static PLAY_SVG: &[u8] = include_bytes!("img/play.svg");
-static SETTINGS_SVG: &[u8] = include_bytes!("img/settings.svg");
+use std::time::Duration;
 
 pub fn create_header_bar(
   settings: Rc<RefCell<FmlSettings>>,
-  audio: AudioPlayer,
-  window: &Rc<gtk::ApplicationWindow>,
+  playback_controller: Rc<PlaybackController>,
   tracks: Rc<Vec<Rc<Track>>>,
 ) -> gtk::Box {
-  let audio_for_volume = audio.clone();
-  let audio_for_pause = audio.clone();
-  let audio_for_play = audio.clone();
-  let audio_for_stop = audio.clone();
-  let window_for_settings = Rc::clone(window);
+  let pc_for_volume = Rc::clone(&playback_controller);
+  let pc_for_pause = Rc::clone(&playback_controller);
+  let pc_for_play = Rc::clone(&playback_controller);
+  let pc_for_stop = Rc::clone(&playback_controller);
+  let pc_for_prev = Rc::clone(&playback_controller);
+  let pc_for_next = Rc::clone(&playback_controller);
+  let pc_for_seek = Rc::clone(&playback_controller);
+  let pc_for_timer = Rc::clone(&playback_controller);
 
-  let prev_btn = create_button(&load_img(PREV_SVG));
-  let stop_btn = create_button(&load_img(STOP_SVG));
-  let next_btn = create_button(&load_img(NEXT_SVG));
-  let pause_btn = create_button(&load_img(PAUSE_SVG));
-  let play_btn = create_button(&load_img(PLAY_SVG));
-  let settings_btn = create_button(&load_img(SETTINGS_SVG));
+  let prev_btn = Button::builder()
+    .icon_name("media-skip-backward-symbolic")
+    .css_classes(["flat"])
+    .build();
+  let stop_btn = Button::builder()
+    .icon_name("media-playback-stop-symbolic")
+    .css_classes(["flat"])
+    .build();
+  let next_btn = Button::builder()
+    .icon_name("media-skip-forward-symbolic")
+    .css_classes(["flat"])
+    .build();
+  let pause_btn = Button::builder()
+    .icon_name("media-playback-pause-symbolic")
+    .css_classes(["flat"])
+    .build();
+  let play_btn = Button::builder()
+    .icon_name("media-playback-start-symbolic")
+    .css_classes(["flat"])
+    .build();
+  let settings_btn = Button::builder()
+    .icon_name("emblem-system-symbolic")
+    .css_classes(["flat"])
+    .build();
 
   let button_box = gtk::Box::new(Orientation::Horizontal, 0);
+  let seek_adjustment = Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0);
   let seek_slider = Scale::builder()
     .hexpand(true)
     .orientation(Orientation::Horizontal)
-    .adjustment(&Adjustment::new(0.0, 0.0, 1.0, 0.01, 0.0, 0.0))
+    .adjustment(&seek_adjustment)
     .build();
 
+  let is_seeking = Rc::new(Cell::new(false));
+
+  let is_seeking_for_change = Rc::clone(&is_seeking);
+  seek_adjustment.connect_value_changed(move |adj| {
+    if is_seeking_for_change.get() {
+      if let Some(duration) = pc_for_seek.audio().get_duration() {
+        let pos_secs = adj.value() * duration.as_secs_f64();
+        pc_for_seek.audio().try_seek(Duration::from_secs_f64(pos_secs));
+      }
+    }
+  });
+
+  let is_seeking_for_press = Rc::clone(&is_seeking);
+  let gesture = gtk::GestureClick::new();
+  gesture.connect_pressed(move |_, _, _, _| {
+    is_seeking_for_press.set(true);
+  });
+  seek_slider.add_controller(gesture);
+
+  let is_seeking_for_release = Rc::clone(&is_seeking);
+  let gesture_release = gtk::GestureClick::new();
+  gesture_release.connect_released(move |_, _, _, _| {
+    is_seeking_for_release.set(false);
+  });
+  seek_slider.add_controller(gesture_release);
+
+  let seek_adjustment_for_timer = seek_adjustment.clone();
+  let is_seeking_for_timer = Rc::clone(&is_seeking);
+  glib::timeout_add_local(Duration::from_millis(250), move || {
+    if !is_seeking_for_timer.get() {
+      if let Some(duration) = pc_for_timer.audio().get_duration() {
+        let duration_secs = duration.as_secs_f64();
+        if duration_secs > 0.0 {
+          let pos = pc_for_timer.audio().get_pos().as_secs_f64();
+          let fraction = (pos / duration_secs).clamp(0.0, 1.0);
+          seek_adjustment_for_timer.set_value(fraction);
+        }
+      }
+    }
+    ControlFlow::Continue
+  });
+
   let volume_button = ScaleButton::builder()
+    .icons([
+      "audio-volume-muted-symbolic",
+      "audio-volume-low-symbolic",
+      "audio-volume-medium-symbolic",
+      "audio-volume-high-symbolic",
+    ])
     .value({
       let s = settings.borrow();
       s.volume
@@ -49,7 +111,7 @@ pub fn create_header_bar(
     .build();
   let settings_for_volume = Rc::clone(&settings);
   volume_button.connect_value_changed(move |_, volume| {
-    audio_for_volume.set_volume(volume as f32);
+    pc_for_volume.audio().set_volume(volume as f32);
     let mut s = settings_for_volume.borrow_mut();
     s.volume = volume;
     if let Err(e) = crate::settings::write_settings(&s) {
@@ -67,20 +129,28 @@ pub fn create_header_bar(
   button_box.append(&volume_button);
 
   pause_btn.connect_clicked(move |_| {
-    audio_for_pause.pause();
+    pc_for_pause.audio().pause();
   });
 
   play_btn.connect_clicked(move |_| {
-    audio_for_play.play();
+    pc_for_play.audio().play();
   });
 
   stop_btn.connect_clicked(move |_| {
-    audio_for_stop.stop();
+    pc_for_stop.audio().stop();
+  });
+
+  prev_btn.connect_clicked(move |_| {
+    pc_for_prev.play_prev();
+  });
+
+  next_btn.connect_clicked(move |_| {
+    pc_for_next.play_next();
   });
 
   settings_btn.connect_clicked(move |_| {
     MainContext::default().spawn_local(crate::preferences_dialog::dialog(
-      Rc::clone(&window_for_settings),
+      Rc::clone(&playback_controller),
       Rc::clone(&settings),
       Rc::clone(&tracks),
     ));

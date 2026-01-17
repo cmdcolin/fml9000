@@ -3,6 +3,7 @@ mod grid_cell;
 mod gtk_helpers;
 mod header_bar;
 mod load_css;
+mod playback_controller;
 mod playlist_manager;
 mod playlist_view;
 mod preferences_dialog;
@@ -16,9 +17,11 @@ use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::{AlertDialog, ApplicationWindow, CustomFilter, Image, Orientation, Paned};
 use header_bar::create_header_bar;
+use playback_controller::PlaybackController;
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
 use rodio::{OutputStream, Sink};
+use std::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -27,6 +30,7 @@ const APP_ID: &str = "com.github.fml9000";
 struct AudioState {
   _stream: OutputStream,
   sink: Sink,
+  duration: Option<Duration>,
 }
 
 #[derive(Clone)]
@@ -56,6 +60,7 @@ impl AudioPlayer {
     Ok(AudioState {
       _stream: stream,
       sink,
+      duration: None,
     })
   }
 
@@ -87,17 +92,48 @@ impl AudioPlayer {
     }
   }
 
-  pub fn play_source<S>(&self, source: S) -> bool
+  pub fn play_source<S>(&self, source: S, duration: Option<Duration>) -> bool
   where
     S: rodio::Source + Send + 'static,
     S::Item: rodio::Sample + Send,
     f32: rodio::cpal::FromSample<S::Item>,
   {
-    if let Some(audio) = self.inner.borrow().as_ref() {
+    if let Some(audio) = self.inner.borrow_mut().as_mut() {
       audio.sink.stop();
       audio.sink.append(source);
       audio.sink.play();
+      audio.duration = duration;
       true
+    } else {
+      false
+    }
+  }
+
+  pub fn try_seek(&self, pos: Duration) {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      let _ = audio.sink.try_seek(pos);
+    }
+  }
+
+  pub fn get_pos(&self) -> Duration {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.get_pos()
+    } else {
+      Duration::ZERO
+    }
+  }
+
+  pub fn get_duration(&self) -> Option<Duration> {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.duration
+    } else {
+      None
+    }
+  }
+
+  pub fn is_playing(&self) -> bool {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      !audio.sink.is_paused() && !audio.sink.empty()
     } else {
       false
     }
@@ -164,11 +200,16 @@ fn app_main(application: &Application) {
   load_playlist_store(tracks.iter(), &playlist_store);
   load_facet_store(&tracks, &facet_store);
 
+  let playback_controller = PlaybackController::new(
+    audio.clone(),
+    playlist_store.clone(),
+    Rc::clone(&album_art),
+    Rc::clone(&window),
+  );
+
   let playlist_view = create_playlist_view(
     playlist_store.clone(),
-    audio.clone(),
-    &album_art,
-    &window,
+    Rc::clone(&playback_controller),
   );
   let playlist_mgr_view = create_playlist_manager(
     &playlist_mgr_store,
@@ -199,7 +240,7 @@ fn app_main(application: &Application) {
     .build();
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
-  let header = create_header_bar(Rc::clone(&settings), audio, &window, Rc::clone(&tracks));
+  let header = create_header_bar(Rc::clone(&settings), Rc::clone(&playback_controller), Rc::clone(&tracks));
 
   main_ui.append(&header);
   main_ui.append(&main_pane);

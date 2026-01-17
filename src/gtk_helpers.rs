@@ -44,5 +44,7 @@ pub fn load_img(svg_data: &'static [u8]) -> Image {
 }
 
 pub fn create_button(img: &Image) -> Button {
-  Button::builder().child(img).build()
+  let button = Button::builder().child(img).build();
+  button.add_css_class("flat");
+  button
 }
