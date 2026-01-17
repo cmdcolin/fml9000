@@ -239,7 +239,7 @@ fn app_main(application: &Application) {
     Rc::clone(&settings),
     Rc::clone(&current_playlist_id),
   );
-  let playlist_mgr_view = create_playlist_manager(
+  let (playlist_mgr_view, playlist_mgr_selection) = create_playlist_manager(
     &playlist_mgr_store,
     playlist_store.clone(),
     Rc::clone(&tracks),
@@ -249,7 +249,22 @@ fn app_main(application: &Application) {
   );
   let playlist_store_for_header = playlist_store.clone();
   let facet_store_for_header = facet_store.clone();
-  let facet_box = create_facet_box(playlist_store, facet_store, filter, &tracks, Rc::clone(&settings));
+  let (facet_box, facet_selection) = create_facet_box(playlist_store, facet_store, filter, &tracks, Rc::clone(&settings));
+
+  // Wire up mutual deselection between facet and playlist manager
+  let playlist_mgr_selection_for_facet = playlist_mgr_selection.clone();
+  facet_selection.connect_selection_changed(move |sel, _, _| {
+    if !sel.selection().is_empty() {
+      playlist_mgr_selection_for_facet.set_selected(gtk::INVALID_LIST_POSITION);
+    }
+  });
+
+  let facet_selection_for_playlist = Rc::clone(&facet_selection);
+  playlist_mgr_selection.connect_selection_changed(move |sel, _, _| {
+    if sel.selected() != gtk::INVALID_LIST_POSITION {
+      facet_selection_for_playlist.unselect_all();
+    }
+  });
 
   let left_pane = Paned::builder()
     .vexpand(true)

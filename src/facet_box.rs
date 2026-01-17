@@ -22,7 +22,7 @@ pub fn create_facet_box(
   filter: CustomFilter,
   tracks: &Rc<Vec<Rc<Track>>>,
   settings: Rc<RefCell<FmlSettings>>,
-) -> gtk::Box {
+) -> (gtk::Box, Rc<MultiSelection>) {
   let case_insensitive_sorter = CustomSorter::new(|obj1, obj2| {
     let k1: Ref<Facet> = obj1.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
     let k2: Ref<Facet> = obj2.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
@@ -126,5 +126,5 @@ pub fn create_facet_box(
   });
   facet_box.append(&search_bar);
   facet_box.append(&facet_wnd);
-  facet_box
+  (facet_box, facet_selection)
 }

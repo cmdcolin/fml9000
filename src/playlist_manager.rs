@@ -39,13 +39,17 @@ pub fn create_playlist_manager(
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
   current_playlist_id: Rc<RefCell<Option<i32>>>,
-) -> gtk::Box {
-  let selection = SingleSelection::builder().model(playlist_mgr_store).build();
+) -> (gtk::Box, SingleSelection) {
+  let selection = SingleSelection::builder()
+    .model(playlist_mgr_store)
+    .autoselect(false)
+    .build();
   let columnview = ColumnView::builder().model(&selection).build();
   let factory = SignalListItemFactory::new();
 
   let playback_controller_for_setup = playback_controller.clone();
   let playlist_mgr_store_for_setup = playlist_mgr_store.clone();
+  let selection_for_setup = selection.clone();
   factory.connect_setup(move |_factory, item| {
     setup_col(item);
 
@@ -73,6 +77,8 @@ pub fn create_playlist_manager(
       });
 
       let child_for_drop = child.clone();
+      let sel = selection_for_setup.clone();
+      let store_for_select = playlist_mgr_store_for_setup.clone();
       drop_target.connect_drop(move |_target, value, _x, _y| {
         child_for_drop.remove_css_class("drop-target-hover");
 
@@ -81,7 +87,22 @@ pub fn create_playlist_manager(
         };
 
         if let Some(playlist_id) = *pid.borrow() {
-          return handle_drop_on_playlist(playlist_id, &data);
+          let result = handle_drop_on_playlist(playlist_id, &data);
+          if result {
+            for i in 0..store_for_select.n_items() {
+              if let Some(item) = store_for_select.item(i) {
+                let obj = item.downcast::<BoxedAnyObject>().unwrap();
+                let playlist: Ref<Playlist> = obj.borrow();
+                if let PlaylistType::UserPlaylist(id, _) = &playlist.playlist_type {
+                  if *id == playlist_id {
+                    sel.set_selected(i);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          return result;
         }
 
         let store_clone = store.clone();
@@ -293,7 +314,7 @@ pub fn create_playlist_manager(
   container.append(&header_box);
   container.append(&scrolled);
 
-  container
+  (container, selection)
 }
 
 fn populate_playlist_store(store: &ListStore) {
