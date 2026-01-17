@@ -21,3 +21,4 @@ toml = "0.8"
 walkdir = "2"
 adw = { version = "0.7", package = "libadwaita" }
 rand = "0.8"
+ureq = { version = "2", features = ["json"] }

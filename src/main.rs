@@ -12,6 +12,7 @@ mod settings;
 mod video_widget;
 mod youtube;
 mod youtube_add_dialog;
+mod youtube_api;
 
 use adw::prelude::*;
 use adw::Application;

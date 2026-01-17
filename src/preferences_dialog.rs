@@ -1,8 +1,12 @@
 use crate::playback_controller::PlaybackController;
 use crate::settings::{write_settings, FmlSettings, RowHeight};
+use crate::youtube_api;
 use adw::prelude::*;
 use fml9000::models::Track;
-use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan_with_progress, ScanProgress};
+use fml9000::{
+  add_youtube_videos, get_video_ids_for_channel, get_youtube_channels, load_facet_store,
+  load_playlist_store, load_tracks, run_scan_with_progress, update_channel_last_fetched, ScanProgress,
+};
 use gtk::gio;
 use gtk::gio::ListStore;
 use gtk::glib;
@@ -230,10 +234,28 @@ pub async fn dialog(
   appearance_group.add(&compact_row);
   appearance_group.add(&ultra_compact_row);
 
+  let refresh_yt_button = gtk::Button::builder()
+    .label("Refresh All")
+    .css_classes(["suggested-action"])
+    .valign(gtk::Align::Center)
+    .build();
+
+  let refresh_yt_row = adw::ActionRow::builder()
+    .title("Refresh YouTube Channels")
+    .subtitle("Fetch new videos from all YouTube channels")
+    .build();
+  refresh_yt_row.add_suffix(&refresh_yt_button);
+
+  let youtube_group = adw::PreferencesGroup::builder()
+    .title("YouTube Channels")
+    .build();
+  youtube_group.add(&refresh_yt_row);
+
   let page = adw::PreferencesPage::new();
   page.add(&library_group);
   page.add(&scan_group);
   page.add(&appearance_group);
+  page.add(&youtube_group);
 
   let preferences_window = adw::PreferencesWindow::builder()
     .title("Preferences")
@@ -484,6 +506,204 @@ pub async fn dialog(
       drop(s);
       refresh_stores(&ps3, &fs3, &pms3);
     }
+  });
+
+  let prefs_window_for_yt = preferences_window.clone();
+  let playlist_mgr_store_for_yt = playlist_mgr_store.clone();
+  refresh_yt_button.connect_clicked(move |btn| {
+    btn.set_sensitive(false);
+
+    let channels = match get_youtube_channels() {
+      Ok(c) => c,
+      Err(e) => {
+        eprintln!("Failed to get YouTube channels: {e}");
+        btn.set_sensitive(true);
+        return;
+      }
+    };
+
+    if channels.is_empty() {
+      btn.set_sensitive(true);
+      return;
+    }
+
+    let progress_dialog = gtk::Window::builder()
+      .title("Refreshing YouTube Channels")
+      .modal(true)
+      .transient_for(&prefs_window_for_yt)
+      .default_width(450)
+      .default_height(150)
+      .resizable(false)
+      .deletable(false)
+      .build();
+
+    let content = gtk::Box::builder()
+      .orientation(gtk::Orientation::Vertical)
+      .spacing(12)
+      .margin_top(24)
+      .margin_bottom(24)
+      .margin_start(24)
+      .margin_end(24)
+      .build();
+
+    let status_label = gtk::Label::builder()
+      .label("Starting refresh...")
+      .xalign(0.0)
+      .wrap(true)
+      .build();
+
+    let progress_bar = gtk::ProgressBar::builder()
+      .show_text(true)
+      .build();
+
+    content.append(&status_label);
+    content.append(&progress_bar);
+    progress_dialog.set_child(Some(&content));
+    progress_dialog.present();
+
+    #[derive(Debug)]
+    enum YtRefreshProgress {
+      StartingChannel(String),
+      FoundVideos(String, usize),
+      ChannelDone(String, usize),
+      ChannelError(String, String),
+      AllDone(usize, usize),
+    }
+
+    let (tx, rx) = mpsc::channel::<YtRefreshProgress>();
+    let total_channels = channels.len();
+
+    let channel_data: Vec<_> = channels
+      .iter()
+      .map(|c| (c.id, c.name.clone(), c.handle.clone()))
+      .collect();
+
+    std::thread::spawn(move || {
+      let mut total_new_videos = 0usize;
+      let mut channels_updated = 0usize;
+
+      for (channel_id, channel_name, channel_handle) in &channel_data {
+        let _ = tx.send(YtRefreshProgress::StartingChannel(channel_name.clone()));
+
+        let handle = match channel_handle {
+          Some(h) => h.clone(),
+          None => {
+            let _ = tx.send(YtRefreshProgress::ChannelError(
+              channel_name.clone(),
+              "No handle available".to_string(),
+            ));
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            continue;
+          }
+        };
+
+        let existing_ids = match get_video_ids_for_channel(*channel_id) {
+          Ok(ids) => ids,
+          Err(e) => {
+            let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            continue;
+          }
+        };
+
+        let playlist_id = match youtube_api::get_playlist_id_for_handle(&handle) {
+          Ok(id) => id,
+          Err(e) => {
+            let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            continue;
+          }
+        };
+
+        let name_for_progress = channel_name.clone();
+        let tx_for_progress = tx.clone();
+        let new_videos = match youtube_api::fetch_new_videos(&playlist_id, &existing_ids, move |found, _total| {
+          let _ = tx_for_progress.send(YtRefreshProgress::FoundVideos(name_for_progress.clone(), found));
+        }) {
+          Ok(v) => v,
+          Err(e) => {
+            let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            continue;
+          }
+        };
+
+        let new_count = new_videos.len();
+        if new_count > 0 {
+          let video_tuples: Vec<_> = new_videos
+            .iter()
+            .map(|v| (v.video_id.clone(), v.title.clone(), None, None, v.published_at))
+            .collect();
+          let _ = add_youtube_videos(*channel_id, &video_tuples);
+          total_new_videos += new_count;
+        }
+
+        let _ = update_channel_last_fetched(*channel_id);
+        channels_updated += 1;
+
+        let _ = tx.send(YtRefreshProgress::ChannelDone(channel_name.clone(), new_count));
+        std::thread::sleep(std::time::Duration::from_secs(3));
+      }
+
+      let _ = tx.send(YtRefreshProgress::AllDone(channels_updated, total_new_videos));
+    });
+
+    let btn_clone = btn.clone();
+    let dialog_clone = progress_dialog.clone();
+    let status_clone = status_label.clone();
+    let progress_clone = progress_bar.clone();
+    let pms_clone = playlist_mgr_store_for_yt.clone();
+    let channels_done = Rc::new(RefCell::new(0usize));
+
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+      while let Ok(progress) = rx.try_recv() {
+        match progress {
+          YtRefreshProgress::StartingChannel(name) => {
+            let done = *channels_done.borrow();
+            status_clone.set_label(&format!("Checking {} ({}/{})", name, done + 1, total_channels));
+            progress_clone.set_fraction(done as f64 / total_channels as f64);
+          }
+          YtRefreshProgress::FoundVideos(name, count) => {
+            status_clone.set_label(&format!("{}: found {} new videos...", name, count));
+          }
+          YtRefreshProgress::ChannelDone(name, count) => {
+            *channels_done.borrow_mut() += 1;
+            let done = *channels_done.borrow();
+            if count > 0 {
+              status_clone.set_label(&format!("{}: added {} new videos", name, count));
+            } else {
+              status_clone.set_label(&format!("{}: up to date", name));
+            }
+            progress_clone.set_fraction(done as f64 / total_channels as f64);
+          }
+          YtRefreshProgress::ChannelError(name, err) => {
+            *channels_done.borrow_mut() += 1;
+            let done = *channels_done.borrow();
+            status_clone.set_label(&format!("{}: error - {}", name, err));
+            progress_clone.set_fraction(done as f64 / total_channels as f64);
+          }
+          YtRefreshProgress::AllDone(channels, videos) => {
+            progress_clone.set_fraction(1.0);
+            status_clone.set_label(&format!(
+              "Complete: {} channels checked, {} new videos added",
+              channels, videos
+            ));
+
+            refresh_store(&pms_clone);
+
+            let dialog = dialog_clone.clone();
+            let btn = btn_clone.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(2000), move || {
+              dialog.close();
+              btn.set_sensitive(true);
+            });
+
+            return glib::ControlFlow::Break;
+          }
+        }
+      }
+      glib::ControlFlow::Continue
+    });
   });
 
   preferences_window.present();

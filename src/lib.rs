@@ -472,6 +472,17 @@ pub fn update_channel_last_fetched(id: i32) -> Result<(), String> {
   Ok(())
 }
 
+pub fn get_video_ids_for_channel(db_channel_id: i32) -> Result<std::collections::HashSet<String>, String> {
+  let mut conn = connect_db()?;
+
+  youtube_videos::table
+    .filter(youtube_videos::channel_id.eq(db_channel_id))
+    .select(youtube_videos::video_id)
+    .load::<String>(&mut conn)
+    .map(|v| v.into_iter().collect())
+    .map_err(|e| format!("Failed to load video IDs: {e}"))
+}
+
 pub fn create_playlist(name: &str) -> Result<i32, String> {
   use self::models::NewPlaylist;
 
