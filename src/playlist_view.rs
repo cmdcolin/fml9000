@@ -8,11 +8,36 @@ use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  ColumnView, ColumnViewColumn, GestureClick, MultiSelection, PopoverMenu, ScrolledWindow,
-  SignalListItemFactory,
+  ColumnView, ColumnViewColumn, CustomSorter, GestureClick, MultiSelection, PopoverMenu,
+  ScrolledWindow, SignalListItemFactory, SortListModel,
 };
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
+
+fn open_folder_in_explorer(file_path: &str) {
+  if let Some(parent) = Path::new(file_path).parent() {
+    let folder = parent.to_string_lossy();
+    #[cfg(target_os = "linux")]
+    {
+      let _ = std::process::Command::new("xdg-open")
+        .arg(folder.as_ref())
+        .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+      let _ = std::process::Command::new("open")
+        .arg(folder.as_ref())
+        .spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+      let _ = std::process::Command::new("explorer")
+        .arg(folder.as_ref())
+        .spawn();
+    }
+  }
+}
 
 enum PlaylistItem {
   Track(Rc<Track>),
@@ -29,15 +54,45 @@ fn try_get_item(obj: &BoxedAnyObject) -> Option<PlaylistItem> {
   None
 }
 
-fn create_column(cb: impl Fn(&PlaylistItem) -> String + 'static) -> SignalListItemFactory {
+fn create_sorter(extract: impl Fn(&PlaylistItem) -> String + 'static) -> CustomSorter {
+  CustomSorter::new(move |obj1, obj2| {
+    let val1 = obj1
+      .downcast_ref::<BoxedAnyObject>()
+      .and_then(|o| try_get_item(o))
+      .map(|item| extract(&item))
+      .unwrap_or_default();
+    let val2 = obj2
+      .downcast_ref::<BoxedAnyObject>()
+      .and_then(|o| try_get_item(o))
+      .map(|item| extract(&item))
+      .unwrap_or_default();
+    val1.to_lowercase().cmp(&val2.to_lowercase()).into()
+  })
+}
+
+fn create_column(
+  settings: Rc<RefCell<FmlSettings>>,
+  cb: impl Fn(&PlaylistItem) -> String + 'static,
+) -> SignalListItemFactory {
   let factory = SignalListItemFactory::new();
   factory.connect_setup(move |_factory, item| setup_col(item));
+  let settings_for_bind = settings.clone();
   factory.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
+    let row_height = settings_for_bind.borrow().row_height;
+    cell.set_row_height(row_height.height_pixels(), row_height.is_compact());
     if let Some(playlist_item) = try_get_item(&obj) {
       cell.set_entry(&Entry {
         name: cb(&playlist_item),
       });
+    }
+  });
+  factory.connect_unbind(move |_factory, item| {
+    let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    if let Some(child) = item.child() {
+      if let Some(cell) = child.downcast_ref::<crate::grid_cell::GridCell>() {
+        cell.set_entry(&Entry { name: String::new() });
+      }
     }
   });
   factory
@@ -48,10 +103,56 @@ pub fn create_playlist_view(
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
 ) -> ScrolledWindow {
-  let playlist_sel = MultiSelection::new(Some(playlist_store.clone()));
-  let playlist_columnview = ColumnView::builder().model(&playlist_sel).build();
+  // Create sorters for each column
+  let artistalbum_sorter = create_sorter(|item| match item {
+    PlaylistItem::Track(r) => format!(
+      "{} // {}",
+      str_or_unknown(&r.album),
+      str_or_unknown(&r.artist),
+    ),
+    PlaylistItem::Video(v) => format!("YouTube // {}", format_duration(v.duration_seconds)),
+  });
 
-  let artistalbum = create_column(|item| match item {
+  let track_num_sorter = CustomSorter::new(move |obj1, obj2| {
+    let get_track = |obj: &gtk::glib::Object| -> String {
+      obj
+        .downcast_ref::<BoxedAnyObject>()
+        .and_then(|o| try_get_item(o))
+        .map(|item| match item {
+          PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
+          PlaylistItem::Video(_) => String::new(),
+        })
+        .unwrap_or_default()
+    };
+    let val1 = get_track(obj1);
+    let val2 = get_track(obj2);
+
+    // Try numeric comparison first
+    match (val1.parse::<i32>(), val2.parse::<i32>()) {
+      (Ok(n1), Ok(n2)) => n1.cmp(&n2).into(),
+      _ => val1.to_lowercase().cmp(&val2.to_lowercase()).into(),
+    }
+  });
+
+  let title_sorter = create_sorter(|item| match item {
+    PlaylistItem::Track(r) => r.title.clone().unwrap_or_default(),
+    PlaylistItem::Video(v) => v.title.clone(),
+  });
+
+  let filename_sorter = create_sorter(|item| match item {
+    PlaylistItem::Track(r) => r.filename.clone(),
+    PlaylistItem::Video(v) => v.video_id.clone(),
+  });
+
+  // Wrap store in SortListModel
+  let sort_model = SortListModel::new(Some(playlist_store.clone()), None::<gtk::Sorter>);
+  let playlist_sel = MultiSelection::new(Some(sort_model.clone()));
+  let playlist_columnview = ColumnView::builder()
+    .model(&playlist_sel)
+    .build();
+
+
+  let artistalbum = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => {
       format!(
         "{} // {}",
@@ -62,17 +163,17 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => format!("YouTube // {}", format_duration(v.duration_seconds)),
   });
 
-  let track_num = create_column(|item| match item {
+  let track_num = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
     PlaylistItem::Video(_) => String::new(),
   });
 
-  let title = create_column(|item| match item {
+  let title = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.title.clone().unwrap_or_default(),
     PlaylistItem::Video(v) => v.title.clone(),
   });
 
-  let filename = create_column(|item| match item {
+  let filename = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.filename.clone(),
     PlaylistItem::Video(v) => v.video_id.clone(),
   });
@@ -83,6 +184,7 @@ pub fn create_playlist_view(
     .fixed_width(400)
     .title("Album / Artist")
     .factory(&artistalbum)
+    .sorter(&artistalbum_sorter)
     .build();
 
   let playlist_col2 = ColumnViewColumn::builder()
@@ -90,6 +192,7 @@ pub fn create_playlist_view(
     .resizable(true)
     .title("#")
     .fixed_width(20)
+    .sorter(&track_num_sorter)
     .factory(&track_num)
     .build();
 
@@ -99,6 +202,7 @@ pub fn create_playlist_view(
     .title("Title")
     .fixed_width(300)
     .factory(&title)
+    .sorter(&title_sorter)
     .build();
 
   let playlist_col4 = ColumnViewColumn::builder()
@@ -107,12 +211,19 @@ pub fn create_playlist_view(
     .fixed_width(2000)
     .title("Filename")
     .factory(&filename)
+    .sorter(&filename_sorter)
     .build();
 
   playlist_columnview.append_column(&playlist_col1);
   playlist_columnview.append_column(&playlist_col2);
   playlist_columnview.append_column(&playlist_col3);
   playlist_columnview.append_column(&playlist_col4);
+
+  // Bind ColumnView sorter to the SortListModel
+  playlist_columnview
+    .bind_property("sorter", &sort_model, "sorter")
+    .sync_create()
+    .build();
 
   let pc_for_activate = playback_controller.clone();
   let store_for_activate = playlist_store.clone();
@@ -135,16 +246,24 @@ pub fn create_playlist_view(
     }
   });
 
-  let menu = gtk::gio::Menu::new();
-  menu.append(Some("Play (Audio)"), Some("playlist.play-audio"));
-  menu.append(Some("Play (Video)"), Some("playlist.play-video"));
-  menu.append(Some("Open in Browser"), Some("playlist.open-browser"));
+  let video_menu = gtk::gio::Menu::new();
+  video_menu.append(Some("Play (Audio)"), Some("playlist.play-audio"));
+  video_menu.append(Some("Play (Video)"), Some("playlist.play-video"));
+  video_menu.append(Some("Open in Browser"), Some("playlist.open-browser"));
 
-  let popover = PopoverMenu::from_model(Some(&menu));
-  popover.set_parent(&playlist_columnview);
-  popover.set_has_arrow(false);
+  let video_popover = PopoverMenu::from_model(Some(&video_menu));
+  video_popover.set_parent(&playlist_columnview);
+  video_popover.set_has_arrow(false);
+
+  let track_menu = gtk::gio::Menu::new();
+  track_menu.append(Some("Open Folder"), Some("playlist.open-folder"));
+
+  let track_popover = PopoverMenu::from_model(Some(&track_menu));
+  track_popover.set_parent(&playlist_columnview);
+  track_popover.set_has_arrow(false);
 
   let current_video: Rc<RefCell<Option<Rc<YouTubeVideo>>>> = Rc::new(RefCell::new(None));
+  let current_track: Rc<RefCell<Option<Rc<Track>>>> = Rc::new(RefCell::new(None));
 
   let action_group = gtk::gio::SimpleActionGroup::new();
 
@@ -177,27 +296,83 @@ pub fn create_playlist_view(
   });
   action_group.add_action(&open_browser);
 
+  let ct = current_track.clone();
+  let open_folder = gtk::gio::SimpleAction::new("open-folder", None);
+  open_folder.connect_activate(move |_, _| {
+    if let Some(track) = ct.borrow().as_ref() {
+      open_folder_in_explorer(&track.filename);
+    }
+  });
+  action_group.add_action(&open_folder);
+
   playlist_columnview.insert_action_group("playlist", Some(&action_group));
 
   let gesture = GestureClick::builder().button(3).build();
   let cv = current_video.clone();
-  let pop = popover.clone();
+  let ct = current_track.clone();
+  let video_pop = video_popover.clone();
+  let track_pop = track_popover.clone();
   let store = playlist_store.clone();
-  let sel = playlist_sel.clone();
+  let sel_for_gesture = playlist_sel.clone();
+  let colview_for_gesture = playlist_columnview.clone();
   gesture.connect_released(move |gesture, _n_press, x, y| {
-    let selection = sel.selection();
-    if selection.is_empty() {
-      return;
+    colview_for_gesture.grab_focus();
+
+    let mut found_pos: Option<u32> = None;
+    if let Some(picked) = colview_for_gesture.pick(x, y, gtk::PickFlags::DEFAULT) {
+      let mut widget = Some(picked);
+      while let Some(w) = widget {
+        if let Some(row_y) = w.compute_point(&colview_for_gesture, &gtk::graphene::Point::new(0.0, 0.0)) {
+          let height = w.height();
+          if height > 0 && height < 100 {
+            let widget_top = row_y.y();
+            for i in 0..store.n_items() {
+              let expected_top = 24.0 + (i as f32 * height as f32);
+              if (widget_top - expected_top).abs() < 5.0 {
+                found_pos = Some(i);
+                break;
+              }
+            }
+          }
+        }
+        if found_pos.is_some() {
+          break;
+        }
+        widget = w.parent();
+      }
     }
-    let pos = selection.minimum();
+
+    let pos = found_pos.or_else(|| {
+      let selection = sel_for_gesture.selection();
+      if !selection.is_empty() {
+        Some(selection.minimum())
+      } else {
+        None
+      }
+    });
+
+    let Some(pos) = pos else {
+      return;
+    };
+
+    sel_for_gesture.select_item(pos, true);
 
     if let Some(item) = store.item(pos) {
       if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-        if let Some(PlaylistItem::Video(video)) = try_get_item(&obj) {
-          *cv.borrow_mut() = Some(video);
+        if let Some(playlist_item) = try_get_item(&obj) {
           let rect = gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1);
-          pop.set_pointing_to(Some(&rect));
-          pop.popup();
+          match playlist_item {
+            PlaylistItem::Video(video) => {
+              *cv.borrow_mut() = Some(video);
+              video_pop.set_pointing_to(Some(&rect));
+              video_pop.popup();
+            }
+            PlaylistItem::Track(track) => {
+              *ct.borrow_mut() = Some(track);
+              track_pop.set_pointing_to(Some(&rect));
+              track_pop.popup();
+            }
+          }
           gesture.set_state(gtk::EventSequenceState::Claimed);
         }
       }

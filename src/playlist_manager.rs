@@ -1,6 +1,7 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, setup_col};
 use crate::playback_controller::PlaybackController;
+use crate::settings::FmlSettings;
 use crate::youtube_add_dialog;
 use adw::prelude::*;
 use fml9000::models::{Track, YouTubeVideo};
@@ -8,7 +9,7 @@ use fml9000::{get_videos_for_channel, get_youtube_channels, load_playlist_store,
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::{ColumnView, ColumnViewColumn, ScrolledWindow, SignalListItemFactory, SingleSelection};
-use std::cell::Ref;
+use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 #[derive(Clone, PartialEq)]
@@ -28,14 +29,18 @@ pub fn create_playlist_manager(
   main_playlist_store: ListStore,
   all_tracks: Rc<Vec<Rc<Track>>>,
   playback_controller: Rc<PlaybackController>,
+  settings: Rc<RefCell<FmlSettings>>,
 ) -> gtk::Box {
   let selection = SingleSelection::builder().model(playlist_mgr_store).build();
   let columnview = ColumnView::builder().model(&selection).build();
   let factory = SignalListItemFactory::new();
 
   factory.connect_setup(move |_factory, item| setup_col(item));
+  let settings_for_bind = settings.clone();
   factory.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
+    let row_height = settings_for_bind.borrow().row_height;
+    cell.set_row_height(row_height.height_pixels(), row_height.is_compact());
     let playlist: Ref<Playlist> = obj.borrow();
     cell.set_entry(&Entry {
       name: playlist.name.clone(),

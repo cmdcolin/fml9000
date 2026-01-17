@@ -2,6 +2,7 @@ use crate::grid_cell::Entry;
 use crate::gtk_helpers::{
   get_album_artist_or_artist, get_cell, get_selection, setup_col, str_or_unknown,
 };
+use crate::settings::FmlSettings;
 use fml9000::models::Track;
 use fml9000::{load_playlist_store, Facet};
 use gtk::gio::ListStore;
@@ -12,7 +13,7 @@ use gtk::{
   Orientation, ScrolledWindow, SearchEntry, SignalListItemFactory, SortListModel,
 };
 use regex::Regex;
-use std::cell::Ref;
+use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 pub fn create_facet_box(
@@ -20,6 +21,7 @@ pub fn create_facet_box(
   facet_store: ListStore,
   filter: CustomFilter,
   tracks: &Rc<Vec<Rc<Track>>>,
+  settings: Rc<RefCell<FmlSettings>>,
 ) -> gtk::Box {
   let case_insensitive_sorter = CustomSorter::new(|obj1, obj2| {
     let k1: Ref<Facet> = obj1.downcast_ref::<BoxedAnyObject>().unwrap().borrow();
@@ -80,9 +82,12 @@ pub fn create_facet_box(
     }
   });
 
-  facet.connect_setup(|_factory, item| setup_col(item));
+  facet.connect_setup(move |_factory, item| setup_col(item));
+  let settings_for_bind = settings.clone();
   facet.connect_bind(move |_factory, item| {
     let (cell, obj) = get_cell(item);
+    let row_height = settings_for_bind.borrow().row_height;
+    cell.set_row_height(row_height.height_pixels(), row_height.is_compact());
     let r: Ref<Facet> = obj.borrow();
     cell.set_entry(&Entry {
       name: if r.all {

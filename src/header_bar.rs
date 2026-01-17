@@ -1,17 +1,27 @@
-use crate::playback_controller::PlaybackController;
+use crate::playback_controller::{PlaybackController, PlaybackSource};
 use crate::settings::FmlSettings;
 use adw::prelude::*;
 use fml9000::models::Track;
 use gtk::glib::{self, ControlFlow, MainContext};
-use gtk::{Adjustment, Button, Orientation, Scale, ScaleButton};
+use gtk::{Adjustment, Button, Label, Orientation, Scale, ScaleButton};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
+
+fn format_time(duration: Duration) -> String {
+  let total_secs = duration.as_secs();
+  let mins = total_secs / 60;
+  let secs = total_secs % 60;
+  format!("{mins}:{secs:02}")
+}
 
 pub fn create_header_bar(
   settings: Rc<RefCell<FmlSettings>>,
   playback_controller: Rc<PlaybackController>,
   tracks: Rc<Vec<Rc<Track>>>,
+  playlist_store: gtk::gio::ListStore,
+  facet_store: gtk::gio::ListStore,
+  playlist_mgr_store: gtk::gio::ListStore,
 ) -> gtk::Box {
   let pc_for_volume = Rc::clone(&playback_controller);
   let pc_for_pause = Rc::clone(&playback_controller);
@@ -55,7 +65,22 @@ pub fn create_header_bar(
     .adjustment(&seek_adjustment)
     .build();
 
+  let time_current = Label::builder()
+    .label("0:00")
+    .width_chars(5)
+    .css_classes(["monospace"])
+    .build();
+
+  let time_total = Label::builder()
+    .label("0:00")
+    .width_chars(5)
+    .css_classes(["monospace"])
+    .build();
+
+  let time_separator = Label::builder().label("/").build();
+
   let is_seeking = Rc::new(Cell::new(false));
+  let was_playing = Rc::new(Cell::new(false));
 
   let is_seeking_for_change = Rc::clone(&is_seeking);
   seek_adjustment.connect_value_changed(move |adj| {
@@ -83,14 +108,31 @@ pub fn create_header_bar(
 
   let seek_adjustment_for_timer = seek_adjustment.clone();
   let is_seeking_for_timer = Rc::clone(&is_seeking);
+  let was_playing_for_timer = Rc::clone(&was_playing);
+  let time_current_for_timer = time_current.clone();
+  let time_total_for_timer = time_total.clone();
   glib::timeout_add_local(Duration::from_millis(250), move || {
-    if !is_seeking_for_timer.get() {
+    if pc_for_timer.playback_source() == PlaybackSource::Local {
       if let Some(duration) = pc_for_timer.audio().get_duration() {
         let duration_secs = duration.as_secs_f64();
         if duration_secs > 0.0 {
-          let pos = pc_for_timer.audio().get_pos().as_secs_f64();
-          let fraction = (pos / duration_secs).clamp(0.0, 1.0);
-          seek_adjustment_for_timer.set_value(fraction);
+          let pos = pc_for_timer.audio().get_pos();
+          let pos_secs = pos.as_secs_f64();
+
+          if !is_seeking_for_timer.get() {
+            let fraction = (pos_secs / duration_secs).clamp(0.0, 1.0);
+            seek_adjustment_for_timer.set_value(fraction);
+          }
+
+          time_current_for_timer.set_label(&format_time(pos));
+          time_total_for_timer.set_label(&format_time(duration));
+
+          if was_playing_for_timer.get() && pc_for_timer.audio().is_empty() {
+            was_playing_for_timer.set(false);
+            pc_for_timer.play_next();
+          } else if !pc_for_timer.audio().is_empty() {
+            was_playing_for_timer.set(true);
+          }
         }
       }
     }
@@ -120,6 +162,9 @@ pub fn create_header_bar(
   });
 
   button_box.append(&settings_btn);
+  button_box.append(&time_current);
+  button_box.append(&time_separator);
+  button_box.append(&time_total);
   button_box.append(&seek_slider);
   button_box.append(&play_btn);
   button_box.append(&pause_btn);
@@ -136,8 +181,17 @@ pub fn create_header_bar(
     pc_for_play.audio().play();
   });
 
+  let seek_adjustment_for_stop = seek_adjustment.clone();
+  let time_current_for_stop = time_current.clone();
+  let time_total_for_stop = time_total.clone();
+  let was_playing_for_stop = Rc::clone(&was_playing);
   stop_btn.connect_clicked(move |_| {
-    pc_for_stop.audio().stop();
+    pc_for_stop.stop();
+    pc_for_stop.audio().clear_duration();
+    seek_adjustment_for_stop.set_value(0.0);
+    time_current_for_stop.set_label("0:00");
+    time_total_for_stop.set_label("0:00");
+    was_playing_for_stop.set(false);
   });
 
   prev_btn.connect_clicked(move |_| {
@@ -148,11 +202,17 @@ pub fn create_header_bar(
     pc_for_next.play_next();
   });
 
+  let ps = playlist_store.clone();
+  let fs = facet_store.clone();
+  let pms = playlist_mgr_store.clone();
   settings_btn.connect_clicked(move |_| {
     MainContext::default().spawn_local(crate::preferences_dialog::dialog(
       Rc::clone(&playback_controller),
       Rc::clone(&settings),
       Rc::clone(&tracks),
+      ps.clone(),
+      fs.clone(),
+      pms.clone(),
     ));
   });
 

@@ -33,6 +33,29 @@ fn default_fetch_limit() -> usize {
   100
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowHeight {
+  #[default]
+  Normal,
+  Compact,
+  UltraCompact,
+}
+
+impl RowHeight {
+  pub fn height_pixels(&self) -> i32 {
+    match self {
+      RowHeight::Normal => 24,
+      RowHeight::Compact => 18,
+      RowHeight::UltraCompact => 8,
+    }
+  }
+
+  pub fn is_compact(&self) -> bool {
+    matches!(self, RowHeight::Compact | RowHeight::UltraCompact)
+  }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FmlSettings {
   #[serde(default, deserialize_with = "deserialize_folders", alias = "folder")]
@@ -45,6 +68,8 @@ pub struct FmlSettings {
   pub youtube_audio_only: bool,
   #[serde(default = "default_fetch_limit")]
   pub youtube_fetch_limit: usize,
+  #[serde(default)]
+  pub row_height: RowHeight,
 }
 
 impl Default for FmlSettings {
@@ -55,6 +80,7 @@ impl Default for FmlSettings {
       rescan_on_startup: false,
       youtube_audio_only: true,
       youtube_fetch_limit: 100,
+      row_height: RowHeight::Normal,
     }
   }
 }

@@ -1,12 +1,30 @@
 use crate::playback_controller::PlaybackController;
-use crate::settings::{write_settings, FmlSettings};
+use crate::settings::{write_settings, FmlSettings, RowHeight};
 use adw::prelude::*;
 use fml9000::models::Track;
 use fml9000::run_scan_folders;
 use gtk::gio;
+use gtk::gio::ListStore;
 use gtk::FileDialog;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+fn refresh_store(store: &ListStore) {
+  // Collect all items, clear, and re-add to force complete rebind
+  let items: Vec<_> = (0..store.n_items())
+    .filter_map(|i| store.item(i))
+    .collect();
+  store.remove_all();
+  for item in items {
+    store.append(&item);
+  }
+}
+
+fn refresh_stores(playlist_store: &ListStore, facet_store: &ListStore, playlist_mgr_store: &ListStore) {
+  refresh_store(playlist_store);
+  refresh_store(facet_store);
+  refresh_store(playlist_mgr_store);
+}
 
 fn create_folder_chip(
   folder: &str,
@@ -79,6 +97,9 @@ pub async fn dialog(
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
   tracks: Rc<Vec<Rc<Track>>>,
+  playlist_store: gtk::gio::ListStore,
+  facet_store: gtk::gio::ListStore,
+  playlist_mgr_store: gtk::gio::ListStore,
 ) {
   let wnd = playback_controller.window();
   let folder_flowbox = gtk::FlowBox::builder()
@@ -159,9 +180,57 @@ pub async fn dialog(
   scan_group.add(&rescan_row);
   scan_group.add(&rescan_on_startup_row);
 
+  let current_row_height = settings.borrow().row_height;
+
+  let normal_radio = gtk::CheckButton::builder()
+    .active(current_row_height == RowHeight::Normal)
+    .valign(gtk::Align::Center)
+    .build();
+
+  let compact_radio = gtk::CheckButton::builder()
+    .active(current_row_height == RowHeight::Compact)
+    .group(&normal_radio)
+    .valign(gtk::Align::Center)
+    .build();
+
+  let ultra_compact_radio = gtk::CheckButton::builder()
+    .active(current_row_height == RowHeight::UltraCompact)
+    .group(&normal_radio)
+    .valign(gtk::Align::Center)
+    .build();
+
+  let normal_row = adw::ActionRow::builder()
+    .title("Normal")
+    .subtitle("Standard row height")
+    .build();
+  normal_row.add_prefix(&normal_radio);
+  normal_row.set_activatable_widget(Some(&normal_radio));
+
+  let compact_row = adw::ActionRow::builder()
+    .title("Compact")
+    .subtitle("Smaller row height")
+    .build();
+  compact_row.add_prefix(&compact_radio);
+  compact_row.set_activatable_widget(Some(&compact_radio));
+
+  let ultra_compact_row = adw::ActionRow::builder()
+    .title("Ultra Compact")
+    .subtitle("Smallest row height")
+    .build();
+  ultra_compact_row.add_prefix(&ultra_compact_radio);
+  ultra_compact_row.set_activatable_widget(Some(&ultra_compact_radio));
+
+  let appearance_group = adw::PreferencesGroup::builder()
+    .title("Row Height")
+    .build();
+  appearance_group.add(&normal_row);
+  appearance_group.add(&compact_row);
+  appearance_group.add(&ultra_compact_row);
+
   let page = adw::PreferencesPage::new();
   page.add(&library_group);
   page.add(&scan_group);
+  page.add(&appearance_group);
 
   let preferences_window = adw::PreferencesWindow::builder()
     .title("Preferences")
@@ -226,6 +295,54 @@ pub async fn dialog(
     s.rescan_on_startup = switch.is_active();
     if let Err(e) = write_settings(&s) {
       eprintln!("Warning: {e}");
+    }
+  });
+
+  let settings_for_normal = Rc::clone(&settings);
+  let ps1 = playlist_store.clone();
+  let fs1 = facet_store.clone();
+  let pms1 = playlist_mgr_store.clone();
+  normal_radio.connect_active_notify(move |btn: &gtk::CheckButton| {
+    if btn.is_active() {
+      let mut s = settings_for_normal.borrow_mut();
+      s.row_height = RowHeight::Normal;
+      if let Err(e) = write_settings(&s) {
+        eprintln!("Warning: {e}");
+      }
+      drop(s);
+      refresh_stores(&ps1, &fs1, &pms1);
+    }
+  });
+
+  let settings_for_compact = Rc::clone(&settings);
+  let ps2 = playlist_store.clone();
+  let fs2 = facet_store.clone();
+  let pms2 = playlist_mgr_store.clone();
+  compact_radio.connect_active_notify(move |btn: &gtk::CheckButton| {
+    if btn.is_active() {
+      let mut s = settings_for_compact.borrow_mut();
+      s.row_height = RowHeight::Compact;
+      if let Err(e) = write_settings(&s) {
+        eprintln!("Warning: {e}");
+      }
+      drop(s);
+      refresh_stores(&ps2, &fs2, &pms2);
+    }
+  });
+
+  let settings_for_ultra = Rc::clone(&settings);
+  let ps3 = playlist_store.clone();
+  let fs3 = facet_store.clone();
+  let pms3 = playlist_mgr_store.clone();
+  ultra_compact_radio.connect_active_notify(move |btn: &gtk::CheckButton| {
+    if btn.is_active() {
+      let mut s = settings_for_ultra.borrow_mut();
+      s.row_height = RowHeight::UltraCompact;
+      if let Err(e) = write_settings(&s) {
+        eprintln!("Warning: {e}");
+      }
+      drop(s);
+      refresh_stores(&ps3, &fs3, &pms3);
     }
   });
 

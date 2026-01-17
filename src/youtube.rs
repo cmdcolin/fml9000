@@ -34,6 +34,11 @@ struct YtDlpPlaylistEntry {
   uploader: Option<String>,
   uploader_id: Option<String>,
   uploader_url: Option<String>,
+  playlist_channel: Option<String>,
+  playlist_channel_id: Option<String>,
+  playlist_uploader: Option<String>,
+  playlist_uploader_id: Option<String>,
+  playlist_webpage_url: Option<String>,
   #[serde(rename = "_type")]
   entry_type: Option<String>,
 }
@@ -87,18 +92,31 @@ pub fn fetch_channel_info(
       .map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
     if channel_info.is_none() {
-      if let Some(ch_id) = entry.channel_id.as_ref().or(entry.uploader_id.as_ref()) {
+      let ch_id = entry
+        .channel_id
+        .as_ref()
+        .or(entry.uploader_id.as_ref())
+        .or(entry.playlist_channel_id.as_ref());
+
+      if let Some(ch_id) = ch_id {
         let name = entry
           .channel
           .clone()
           .or(entry.uploader.clone())
+          .or(entry.playlist_channel.clone())
+          .or(entry.playlist_uploader.clone())
           .unwrap_or_else(|| "Unknown Channel".to_string());
         let ch_url = entry
           .channel_url
           .clone()
           .or(entry.uploader_url.clone())
+          .or(entry.playlist_webpage_url.clone())
           .unwrap_or_else(|| parsed_url.clone());
-        let handle = extract_handle(&ch_url);
+        let handle = entry
+          .playlist_uploader_id
+          .clone()
+          .filter(|h| h.starts_with('@'))
+          .or_else(|| extract_handle(&ch_url));
 
         channel_info = Some(ChannelInfo {
           channel_id: ch_id.clone(),

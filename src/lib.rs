@@ -39,13 +39,20 @@ fn get_project_dirs() -> Option<ProjectDirs> {
 pub fn connect_db() -> Result<SqliteConnection, String> {
   let proj_dirs =
     get_project_dirs().ok_or_else(|| "Could not determine config directory".to_string())?;
-  let path = proj_dirs.config_dir().join("library.db");
+  let config_dir = proj_dirs.config_dir();
+  std::fs::create_dir_all(config_dir)
+    .map_err(|e| format!("Failed to create config directory: {e}"))?;
+  let path = config_dir.join("library.db");
   let path_str = path
     .to_str()
     .ok_or_else(|| "Database path contains invalid UTF-8".to_string())?;
   let database_url = format!("sqlite://{}", path_str);
-  SqliteConnection::establish(&database_url)
-    .map_err(|e| format!("Error connecting to database: {e}"))
+  let mut conn = SqliteConnection::establish(&database_url)
+    .map_err(|e| format!("Error connecting to database: {e}"))?;
+  conn
+    .run_pending_migrations(MIGRATIONS)
+    .map_err(|e| format!("Failed to run migrations: {e}"))?;
+  Ok(conn)
 }
 
 fn hashset(data: &[Rc<Track>]) -> HashSet<&String> {

@@ -18,7 +18,8 @@ use facet_box::create_facet_box;
 use fml9000::{load_facet_store, load_playlist_store, load_tracks, run_scan_folders};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
-use gtk::{AlertDialog, ApplicationWindow, CustomFilter, Image, Orientation, Paned};
+use gtk::gdk::Key;
+use gtk::{AlertDialog, ApplicationWindow, CustomFilter, EventControllerKey, Image, Orientation, Paned};
 use header_bar::create_header_bar;
 use playback_controller::PlaybackController;
 use playlist_manager::create_playlist_manager;
@@ -141,6 +142,20 @@ impl AudioPlayer {
       false
     }
   }
+
+  pub fn is_empty(&self) -> bool {
+    if let Some(audio) = self.inner.borrow().as_ref() {
+      audio.sink.empty()
+    } else {
+      true
+    }
+  }
+
+  pub fn clear_duration(&self) {
+    if let Some(audio) = self.inner.borrow_mut().as_mut() {
+      audio.duration = None;
+    }
+  }
 }
 
 fn show_error_dialog(window: &ApplicationWindow, title: &str, message: &str) {
@@ -220,8 +235,11 @@ fn app_main(application: &Application) {
     playlist_store.clone(),
     Rc::clone(&tracks),
     Rc::clone(&playback_controller),
+    Rc::clone(&settings),
   );
-  let facet_box = create_facet_box(playlist_store, facet_store, filter, &tracks);
+  let playlist_store_for_header = playlist_store.clone();
+  let facet_store_for_header = facet_store.clone();
+  let facet_box = create_facet_box(playlist_store, facet_store, filter, &tracks, Rc::clone(&settings));
 
   let left_pane = Paned::builder()
     .vexpand(true)
@@ -245,10 +263,47 @@ fn app_main(application: &Application) {
     .build();
 
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
-  let header = create_header_bar(Rc::clone(&settings), Rc::clone(&playback_controller), Rc::clone(&tracks));
+  let header = create_header_bar(
+    Rc::clone(&settings),
+    Rc::clone(&playback_controller),
+    Rc::clone(&tracks),
+    playlist_store_for_header,
+    facet_store_for_header,
+    playlist_mgr_store,
+  );
 
   main_ui.append(&header);
   main_ui.append(&main_pane);
+
+  let pc_for_keys = Rc::clone(&playback_controller);
+  let key_controller = EventControllerKey::new();
+  key_controller.connect_key_pressed(move |_, key, _, _| {
+    match key {
+      Key::space => {
+        if pc_for_keys.audio().is_playing() {
+          pc_for_keys.audio().pause();
+        } else {
+          pc_for_keys.audio().play();
+        }
+        gtk::glib::Propagation::Stop
+      }
+      Key::n | Key::N => {
+        pc_for_keys.play_next();
+        gtk::glib::Propagation::Stop
+      }
+      Key::p | Key::P => {
+        pc_for_keys.play_prev();
+        gtk::glib::Propagation::Stop
+      }
+      Key::s | Key::S => {
+        pc_for_keys.stop();
+        gtk::glib::Propagation::Stop
+      }
+      _ => gtk::glib::Propagation::Proceed,
+    }
+  });
+  window.add_controller(key_controller);
+
   window.set_child(Some(&main_ui));
   window.present();
 }
