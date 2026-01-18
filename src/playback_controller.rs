@@ -478,12 +478,12 @@ impl PlaybackController {
 
     let next_index = if self.shuffle_enabled.get() {
       // Shuffle: pick random, but avoid same track if possible
-      let mut rng = rand::thread_rng();
+      let mut rng = rand::rng();
       if len == 1 {
         0
       } else {
         loop {
-          let idx = rng.gen_range(0..len);
+          let idx = rng.random_range(0..len);
           if Some(idx) != self.current_index.get() {
             break idx;
           }

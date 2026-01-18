@@ -27,7 +27,7 @@ use header_bar::create_header_bar;
 use playback_controller::{PlaybackController, PlaybackSource};
 use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
-use rodio::{OutputStream, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use std::time::Duration;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -60,10 +60,9 @@ impl AudioPlayer {
   }
 
   fn init_audio() -> Result<AudioState, String> {
-    let (stream, handle) = OutputStream::try_default()
+    let stream = OutputStreamBuilder::open_default_stream()
       .map_err(|e| format!("Failed to initialize audio output: {e}"))?;
-    let sink =
-      Sink::try_new(&handle).map_err(|e| format!("Failed to create audio sink: {e}"))?;
+    let sink = Sink::connect_new(&stream.mixer());
     Ok(AudioState {
       _stream: stream,
       sink,
@@ -102,7 +101,7 @@ impl AudioPlayer {
   pub fn play_source<S>(&self, source: S, duration: Option<Duration>) -> bool
   where
     S: rodio::Source + Send + 'static,
-    S::Item: rodio::Sample + Send,
+    S::Item: rodio::cpal::Sample + Send,
     f32: rodio::cpal::FromSample<S::Item>,
   {
     if let Some(audio) = self.inner.borrow_mut().as_mut() {

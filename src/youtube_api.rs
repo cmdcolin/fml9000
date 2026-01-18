@@ -70,7 +70,8 @@ pub fn get_playlist_id_for_handle(handle: &str) -> Result<String, String> {
     .map_err(|e| format!("Failed to fetch playlist ID: {e}"))?;
 
   let result: PlaylistIdResponse = response
-    .into_json()
+    .into_body()
+    .read_json()
     .map_err(|e| format!("Failed to parse playlist ID response: {e}"))?;
 
   Ok(result.playlist_id)
@@ -99,7 +100,8 @@ pub fn fetch_new_videos(
       .map_err(|e| format!("Failed to fetch playlist contents: {e}"))?;
 
     let result: PlaylistContentsResponse = response
-      .into_json()
+      .into_body()
+      .read_json()
       .map_err(|e| format!("Failed to parse playlist contents: {e}"))?;
 
     for item in result.items {
