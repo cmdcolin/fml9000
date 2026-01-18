@@ -852,6 +852,12 @@ pub fn create_playlist_view(
 
   playlist_columnview.add_controller(gesture);
 
+  // Register callback to scroll to playing track when it changes
+  let columnview_for_scroll = playlist_columnview.clone();
+  playback_controller.set_on_track_changed(Some(Rc::new(move |index| {
+    columnview_for_scroll.scroll_to(index, None::<&ColumnViewColumn>, gtk::ListScrollFlags::FOCUS, None);
+  })));
+
   ScrolledWindow::builder()
     .child(&playlist_columnview)
     .build()

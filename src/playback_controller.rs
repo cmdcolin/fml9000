@@ -59,6 +59,7 @@ pub struct PlaybackController {
   window: Rc<ApplicationWindow>,
   play_stats: RefCell<CurrentPlayStats>,
   on_queue_changed: RefCell<Option<Rc<dyn Fn()>>>,
+  on_track_changed: RefCell<Option<Rc<dyn Fn(u32)>>>,
 }
 
 impl PlaybackController {
@@ -85,6 +86,7 @@ impl PlaybackController {
       window,
       play_stats: RefCell::new(CurrentPlayStats::None),
       on_queue_changed: RefCell::new(None),
+      on_track_changed: RefCell::new(None),
     })
   }
 
@@ -139,14 +141,18 @@ impl PlaybackController {
       return false;
     };
 
-    match item {
+    let result = match item {
       PlayableItem::LocalTrack(track) => self.play_track(index, &track),
       PlayableItem::YouTubeVideo(video) => {
         self.play_youtube_video(&video, true);
         self.current_index.set(Some(index));
         true
       }
+    };
+    if result {
+      self.notify_track_changed(index);
     }
+    result
   }
 
   fn play_track(&self, index: u32, track: &Track) -> bool {
@@ -392,6 +398,16 @@ impl PlaybackController {
   fn notify_queue_changed(&self) {
     if let Some(cb) = self.on_queue_changed.borrow().as_ref() {
       cb();
+    }
+  }
+
+  pub fn set_on_track_changed(&self, callback: Option<Rc<dyn Fn(u32)>>) {
+    *self.on_track_changed.borrow_mut() = callback;
+  }
+
+  fn notify_track_changed(&self, index: u32) {
+    if let Some(cb) = self.on_track_changed.borrow().as_ref() {
+      cb(index);
     }
   }
 
