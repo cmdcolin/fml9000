@@ -231,7 +231,7 @@ pub fn create_header_bar(
           }
         }
 
-        if was_playing_for_timer.get() && !pc_for_timer.video_widget().is_playing() {
+        if was_playing_for_timer.get() && pc_for_timer.video_widget().is_ended() {
           was_playing_for_timer.set(false);
           pc_for_timer.play_next();
         } else if pc_for_timer.video_widget().is_playing() {

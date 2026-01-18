@@ -29,7 +29,7 @@ use playlist_manager::create_playlist_manager;
 use playlist_view::create_playlist_view;
 use rodio::{OutputStream, Sink};
 use std::time::Duration;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 const APP_ID: &str = "com.github.fml9000";
@@ -269,12 +269,14 @@ fn app_main(application: &Application) {
   );
 
   let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+  let is_viewing_playback_queue: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
   let playlist_view = create_playlist_view(
     playlist_store.clone(),
     Rc::clone(&playback_controller),
     Rc::clone(&settings),
     Rc::clone(&current_playlist_id),
+    Rc::clone(&is_viewing_playback_queue),
   );
   let (playlist_mgr_view, playlist_mgr_selection) = create_playlist_manager(
     &playlist_mgr_store,
@@ -283,6 +285,7 @@ fn app_main(application: &Application) {
     Rc::clone(&playback_controller),
     Rc::clone(&settings),
     Rc::clone(&current_playlist_id),
+    Rc::clone(&is_viewing_playback_queue),
   );
   let playlist_store_for_header = playlist_store.clone();
   let facet_store_for_header = facet_store.clone();
@@ -290,9 +293,13 @@ fn app_main(application: &Application) {
 
   // Wire up mutual deselection between facet and playlist manager
   let playlist_mgr_selection_for_facet = playlist_mgr_selection.clone();
+  let is_viewing_queue_for_facet = is_viewing_playback_queue.clone();
+  let playback_controller_for_facet = playback_controller.clone();
   facet_selection.connect_selection_changed(move |sel, _, _| {
     if !sel.selection().is_empty() {
       playlist_mgr_selection_for_facet.set_selected(gtk::INVALID_LIST_POSITION);
+      is_viewing_queue_for_facet.set(false);
+      playback_controller_for_facet.set_on_queue_changed(None);
     }
   });
 
@@ -352,6 +359,7 @@ fn app_main(application: &Application) {
 
   let pc_for_keys = Rc::clone(&playback_controller);
   let key_controller = EventControllerKey::new();
+  key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
   key_controller.connect_key_pressed(move |_, key, _, _| {
     match key {
       Key::space => {

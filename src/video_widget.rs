@@ -206,6 +206,14 @@ impl VideoWidget {
             false
         }
     }
+
+    pub fn is_ended(&self) -> bool {
+        if let Some(media_stream) = self.video.media_stream() {
+            media_stream.is_ended()
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for VideoWidget {

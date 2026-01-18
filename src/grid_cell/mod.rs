@@ -56,10 +56,11 @@ impl GridCell {
   }
 
   pub fn set_playing(&self, playing: bool) {
+    let label = &self.imp().name;
     if playing {
-      self.add_css_class("playing");
+      label.add_css_class("playing");
     } else {
-      self.remove_css_class("playing");
+      label.remove_css_class("playing");
     }
   }
 }

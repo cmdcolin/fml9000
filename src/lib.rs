@@ -307,6 +307,161 @@ pub fn load_recently_played(limit: i64) -> Vec<Rc<Track>> {
     .collect()
 }
 
+pub enum QueueItem {
+  Track(Rc<Track>),
+  Video(Rc<models::YouTubeVideo>),
+}
+
+pub fn add_track_to_queue(track_filename: &str) {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+
+  let max_position: Option<i32> = playback_queue::table
+    .select(diesel::dsl::max(playback_queue::position))
+    .first(&mut conn)
+    .unwrap_or(None);
+
+  let new_position = max_position.unwrap_or(-1) + 1;
+
+  let _ = diesel::insert_into(playback_queue::table)
+    .values(models::NewPlaybackQueueItem {
+      position: new_position,
+      track_filename: Some(track_filename),
+      youtube_video_id: None,
+    })
+    .execute(&mut conn);
+}
+
+pub fn add_video_to_queue(video_id: i32) {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+
+  let max_position: Option<i32> = playback_queue::table
+    .select(diesel::dsl::max(playback_queue::position))
+    .first(&mut conn)
+    .unwrap_or(None);
+
+  let new_position = max_position.unwrap_or(-1) + 1;
+
+  let _ = diesel::insert_into(playback_queue::table)
+    .values(models::NewPlaybackQueueItem {
+      position: new_position,
+      track_filename: None,
+      youtube_video_id: Some(video_id),
+    })
+    .execute(&mut conn);
+}
+
+pub fn remove_track_from_queue(track_filename: &str) {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+
+  let _ = diesel::delete(
+    playback_queue::table.filter(playback_queue::track_filename.eq(track_filename)),
+  )
+  .execute(&mut conn);
+}
+
+pub fn remove_video_from_queue(video_id: i32) {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+
+  let _ = diesel::delete(
+    playback_queue::table.filter(playback_queue::youtube_video_id.eq(video_id)),
+  )
+  .execute(&mut conn);
+}
+
+pub fn pop_queue_front() -> Option<QueueItem> {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return None;
+  };
+
+  let item: Option<models::PlaybackQueueItem> = playback_queue::table
+    .order(playback_queue::position.asc())
+    .first(&mut conn)
+    .ok();
+
+  if let Some(queue_item) = item {
+    let _ = diesel::delete(playback_queue::table.filter(playback_queue::id.eq(queue_item.id)))
+      .execute(&mut conn);
+
+    if let Some(filename) = queue_item.track_filename {
+      return load_track_by_filename(&filename).map(QueueItem::Track);
+    }
+    if let Some(video_id) = queue_item.youtube_video_id {
+      return load_video_by_id(video_id).map(QueueItem::Video);
+    }
+  }
+
+  None
+}
+
+pub fn get_queue_items() -> Vec<QueueItem> {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return Vec::new();
+  };
+
+  let items: Vec<models::PlaybackQueueItem> = playback_queue::table
+    .order(playback_queue::position.asc())
+    .load(&mut conn)
+    .unwrap_or_default();
+
+  let mut result = Vec::new();
+  for item in items {
+    if let Some(filename) = item.track_filename {
+      if let Some(track) = load_track_by_filename(&filename) {
+        result.push(QueueItem::Track(track));
+      }
+    }
+    if let Some(video_id) = item.youtube_video_id {
+      if let Some(video) = load_video_by_id(video_id) {
+        result.push(QueueItem::Video(video));
+      }
+    }
+  }
+  result
+}
+
+pub fn clear_queue() {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return;
+  };
+
+  let _ = diesel::delete(playback_queue::table).execute(&mut conn);
+}
+
+pub fn queue_len() -> usize {
+  use self::schema::playback_queue;
+
+  let Ok(mut conn) = connect_db() else {
+    return 0;
+  };
+
+  playback_queue::table
+    .count()
+    .get_result::<i64>(&mut conn)
+    .unwrap_or(0) as usize
+}
+
 pub fn load_tracks() -> Result<Vec<Rc<Track>>, String> {
   use self::schema::tracks::dsl::*;
 

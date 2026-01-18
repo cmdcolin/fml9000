@@ -2,6 +2,7 @@ use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, setup_col};
 use crate::new_playlist_dialog;
 use crate::playback_controller::PlaybackController;
+use fml9000::QueueItem;
 use crate::settings::FmlSettings;
 use crate::youtube_add_dialog;
 use adw::prelude::*;
@@ -16,13 +17,14 @@ use gtk::gio::ListStore;
 use gtk::glib;
 use gtk::glib::BoxedAnyObject;
 use gtk::{ColumnView, ColumnViewColumn, DropTarget, GestureClick, PopoverMenu, ScrolledWindow, SignalListItemFactory, SingleSelection};
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 
 #[derive(Clone, PartialEq)]
 enum PlaylistType {
   RecentlyAdded,
   RecentlyPlayed,
+  PlaybackQueue,
   YouTubeChannel(i32, String),
   UserPlaylist(i32, String),
 }
@@ -39,6 +41,7 @@ pub fn create_playlist_manager(
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
   current_playlist_id: Rc<RefCell<Option<i32>>>,
+  is_viewing_playback_queue: Rc<Cell<bool>>,
 ) -> (gtk::Box, SingleSelection) {
   let selection = SingleSelection::builder()
     .model(playlist_mgr_store)
@@ -172,12 +175,31 @@ pub fn create_playlist_manager(
   let main_playlist_store_clone = main_playlist_store.clone();
   let all_tracks_clone = all_tracks.clone();
   let current_playlist_id_clone = current_playlist_id.clone();
+  let playback_controller_clone = playback_controller.clone();
+  let is_viewing_playback_queue_clone = is_viewing_playback_queue.clone();
+  let main_playlist_store_for_callback = main_playlist_store.clone();
+  let playback_controller_for_callback = playback_controller.clone();
   selection.connect_selection_changed(move |sel, _, _| {
     if let Some(item) = sel.selected_item() {
       let obj = item.downcast::<BoxedAnyObject>().unwrap();
       let playlist: Ref<Playlist> = obj.borrow();
 
       main_playlist_store_clone.remove_all();
+
+      let is_playback_queue = matches!(&playlist.playlist_type, PlaylistType::PlaybackQueue);
+      is_viewing_playback_queue_clone.set(is_playback_queue);
+
+      if is_playback_queue {
+        let store = main_playlist_store_for_callback.clone();
+        let pc = playback_controller_for_callback.clone();
+        playback_controller_clone.set_on_queue_changed(Some(Rc::new(move || {
+          store.remove_all();
+          let queue_items = pc.get_queue_items();
+          load_queue_items(&queue_items, &store);
+        })));
+      } else {
+        playback_controller_clone.set_on_queue_changed(None);
+      }
 
       match &playlist.playlist_type {
         PlaylistType::RecentlyAdded => {
@@ -188,6 +210,11 @@ pub fn create_playlist_manager(
           *current_playlist_id_clone.borrow_mut() = None;
           let recent = load_recently_played(100);
           load_playlist_store(recent.iter(), &main_playlist_store_clone);
+        }
+        PlaylistType::PlaybackQueue => {
+          *current_playlist_id_clone.borrow_mut() = None;
+          let queue_items = playback_controller_clone.get_queue_items();
+          load_queue_items(&queue_items, &main_playlist_store_clone);
         }
         PlaylistType::YouTubeChannel(id, _) => {
           *current_playlist_id_clone.borrow_mut() = None;
@@ -336,6 +363,10 @@ fn populate_playlist_store(store: &ListStore) {
     name: "Recently played".to_string(),
     playlist_type: PlaylistType::RecentlyPlayed,
   }));
+  store.append(&BoxedAnyObject::new(Playlist {
+    name: "Playback queue".to_string(),
+    playlist_type: PlaylistType::PlaybackQueue,
+  }));
 
   if let Ok(user_playlists) = get_user_playlists() {
     for playlist in user_playlists {
@@ -369,6 +400,19 @@ fn load_user_playlist_items(items: &[UserPlaylistItem], store: &ListStore) {
         store.append(&BoxedAnyObject::new(track.clone()));
       }
       UserPlaylistItem::Video(video) => {
+        store.append(&BoxedAnyObject::new(video.clone()));
+      }
+    }
+  }
+}
+
+fn load_queue_items(items: &[QueueItem], store: &ListStore) {
+  for item in items {
+    match item {
+      QueueItem::Track(track) => {
+        store.append(&BoxedAnyObject::new(track.clone()));
+      }
+      QueueItem::Video(video) => {
         store.append(&BoxedAnyObject::new(video.clone()));
       }
     }

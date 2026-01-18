@@ -1,4 +1,4 @@
-use crate::schema::{playlist_tracks, playlists, recently_played, tracks, youtube_channels, youtube_videos};
+use crate::schema::{playback_queue, playlist_tracks, playlists, recently_played, tracks, youtube_channels, youtube_videos};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
@@ -124,4 +124,22 @@ pub struct NewPlaylistTrack<'a> {
   pub track_filename: Option<&'a str>,
   pub youtube_video_id: Option<i32>,
   pub position: i32,
+}
+
+#[derive(Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::playback_queue)]
+pub struct PlaybackQueueItem {
+  pub id: i32,
+  pub position: i32,
+  pub track_filename: Option<String>,
+  pub youtube_video_id: Option<i32>,
+  pub added_at: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = playback_queue)]
+pub struct NewPlaybackQueueItem<'a> {
+  pub position: i32,
+  pub track_filename: Option<&'a str>,
+  pub youtube_video_id: Option<i32>,
 }

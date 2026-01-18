@@ -17,11 +17,12 @@ use gtk::{
   ColumnView, ColumnViewColumn, CustomSorter, DragSource, DropTarget, EventControllerKey,
   GestureClick, MultiSelection, PopoverMenu, ScrolledWindow, SignalListItemFactory, SortListModel,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
 pub type CurrentPlaylistId = Rc<RefCell<Option<i32>>>;
+pub type IsViewingPlaybackQueue = Rc<Cell<bool>>;
 
 fn format_date(dt: Option<NaiveDateTime>) -> String {
   match dt {
@@ -128,6 +129,7 @@ pub fn create_playlist_view(
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
   current_playlist_id: CurrentPlaylistId,
+  is_viewing_playback_queue: IsViewingPlaybackQueue,
 ) -> ScrolledWindow {
   // Create sorters for each column
   let artistalbum_sorter = create_sorter(|item| match item {
@@ -603,6 +605,7 @@ pub fn create_playlist_view(
   video_menu.append(Some("Play Next"), Some("playlist.queue-video"));
   video_menu.append(Some("Open in Browser"), Some("playlist.open-browser"));
   video_menu.append(Some("Remove from Playlist"), Some("playlist.remove-video"));
+  video_menu.append(Some("Remove from Queue"), Some("playlist.remove-video-from-queue"));
 
   let video_popover = PopoverMenu::from_model(Some(&video_menu));
   video_popover.set_parent(&playlist_columnview);
@@ -612,6 +615,7 @@ pub fn create_playlist_view(
   track_menu.append(Some("Play Next"), Some("playlist.queue-track"));
   track_menu.append(Some("Open Folder"), Some("playlist.open-folder"));
   track_menu.append(Some("Remove from Playlist"), Some("playlist.remove-track"));
+  track_menu.append(Some("Remove from Queue"), Some("playlist.remove-track-from-queue"));
 
   let track_popover = PopoverMenu::from_model(Some(&track_menu));
   track_popover.set_parent(&playlist_columnview);
@@ -731,6 +735,58 @@ pub fn create_playlist_view(
     }
   });
   action_group.add_action(&remove_video);
+
+  let ct = current_track.clone();
+  let pc = playback_controller.clone();
+  let store_for_queue_remove = playlist_store.clone();
+  let is_queue = is_viewing_playback_queue.clone();
+  let remove_track_from_queue = gtk::gio::SimpleAction::new("remove-track-from-queue", None);
+  remove_track_from_queue.connect_activate(move |_, _| {
+    if is_queue.get() {
+      if let Some(track) = ct.borrow().as_ref() {
+        pc.remove_from_queue_by_filename(&track.filename);
+        for i in 0..store_for_queue_remove.n_items() {
+          if let Some(item) = store_for_queue_remove.item(i) {
+            if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+              if let Some(PlaylistItem::Track(t)) = try_get_item(&obj) {
+                if t.filename == track.filename {
+                  store_for_queue_remove.remove(i);
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  action_group.add_action(&remove_track_from_queue);
+
+  let cv = current_video.clone();
+  let pc = playback_controller.clone();
+  let store_for_queue_remove = playlist_store.clone();
+  let is_queue = is_viewing_playback_queue.clone();
+  let remove_video_from_queue = gtk::gio::SimpleAction::new("remove-video-from-queue", None);
+  remove_video_from_queue.connect_activate(move |_, _| {
+    if is_queue.get() {
+      if let Some(video) = cv.borrow().as_ref() {
+        pc.remove_from_queue_by_video_id(video.id);
+        for i in 0..store_for_queue_remove.n_items() {
+          if let Some(item) = store_for_queue_remove.item(i) {
+            if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+              if let Some(PlaylistItem::Video(v)) = try_get_item(&obj) {
+                if v.id == video.id {
+                  store_for_queue_remove.remove(i);
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  action_group.add_action(&remove_video_from_queue);
 
   playlist_columnview.insert_action_group("playlist", Some(&action_group));
 

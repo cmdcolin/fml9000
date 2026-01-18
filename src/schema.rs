@@ -1,6 +1,16 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    playback_queue (id) {
+        id -> Integer,
+        position -> Integer,
+        track_filename -> Nullable<Text>,
+        youtube_video_id -> Nullable<Integer>,
+        added_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     playlist_tracks (id) {
         id -> Integer,
         playlist_id -> Integer,
@@ -29,12 +39,12 @@ diesel::table! {
 diesel::table! {
     tracks (filename) {
         filename -> Text,
-        artist -> Nullable<Text>,
         title -> Nullable<Text>,
+        artist -> Nullable<Text>,
+        track -> Nullable<Text>,
         album -> Nullable<Text>,
         genre -> Nullable<Text>,
         album_artist -> Nullable<Text>,
-        track -> Nullable<Text>,
         added -> Nullable<Timestamp>,
         duration_seconds -> Nullable<Integer>,
         play_count -> Integer,
@@ -70,12 +80,15 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(playback_queue -> tracks (track_filename));
+diesel::joinable!(playback_queue -> youtube_videos (youtube_video_id));
 diesel::joinable!(playlist_tracks -> playlists (playlist_id));
 diesel::joinable!(playlist_tracks -> tracks (track_filename));
 diesel::joinable!(playlist_tracks -> youtube_videos (youtube_video_id));
 diesel::joinable!(youtube_videos -> youtube_channels (channel_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+  playback_queue,
   playlist_tracks,
   playlists,
   recently_played,

@@ -3,8 +3,10 @@ use crate::settings::RepeatMode;
 use crate::video_widget::VideoWidget;
 use crate::AudioPlayer;
 use fml9000::{
-  add_track_to_recently_played, load_track_by_filename, load_video_by_id,
-  update_track_play_stats, update_video_play_stats,
+  add_track_to_recently_played, add_track_to_queue, add_video_to_queue,
+  load_track_by_filename, load_video_by_id, pop_queue_front, queue_len,
+  remove_track_from_queue, remove_video_from_queue, update_track_play_stats,
+  update_video_play_stats, QueueItem,
 };
 use fml9000::models::{Track, YouTubeVideo};
 use gtk::gdk;
@@ -18,7 +20,6 @@ use rand::Rng;
 use rodio::source::Source;
 use rodio::Decoder;
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -45,12 +46,6 @@ enum PlayableItem {
   YouTubeVideo(Rc<YouTubeVideo>),
 }
 
-#[derive(Clone)]
-pub enum QueuedItem {
-  Track(String),     // filename
-  Video(i32),        // video id
-}
-
 pub struct PlaybackController {
   audio: AudioPlayer,
   video_widget: Rc<VideoWidget>,
@@ -63,7 +58,7 @@ pub struct PlaybackController {
   album_art: Rc<Picture>,
   window: Rc<ApplicationWindow>,
   play_stats: RefCell<CurrentPlayStats>,
-  play_queue: RefCell<VecDeque<QueuedItem>>,
+  on_queue_changed: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl PlaybackController {
@@ -89,7 +84,7 @@ impl PlaybackController {
       album_art,
       window,
       play_stats: RefCell::new(CurrentPlayStats::None),
-      play_queue: RefCell::new(VecDeque::new()),
+      on_queue_changed: RefCell::new(None),
     })
   }
 
@@ -389,29 +384,50 @@ impl PlaybackController {
   }
 
   pub fn queue_track(&self, filename: String) {
-    self.play_queue.borrow_mut().push_back(QueuedItem::Track(filename));
+    add_track_to_queue(&filename);
+    self.notify_queue_changed();
   }
 
   pub fn queue_video(&self, video_id: i32) {
-    self.play_queue.borrow_mut().push_back(QueuedItem::Video(video_id));
+    add_video_to_queue(video_id);
+    self.notify_queue_changed();
   }
 
-  pub fn queue_len(&self) -> usize {
-    self.play_queue.borrow().len()
+  pub fn get_queue_len(&self) -> usize {
+    queue_len()
+  }
+
+  pub fn set_on_queue_changed(&self, callback: Option<Rc<dyn Fn()>>) {
+    *self.on_queue_changed.borrow_mut() = callback;
+  }
+
+  fn notify_queue_changed(&self) {
+    if let Some(cb) = self.on_queue_changed.borrow().as_ref() {
+      cb();
+    }
+  }
+
+  pub fn remove_from_queue_by_filename(&self, filename: &str) {
+    remove_track_from_queue(filename);
+    self.notify_queue_changed();
+  }
+
+  pub fn remove_from_queue_by_video_id(&self, video_id: i32) {
+    remove_video_from_queue(video_id);
+    self.notify_queue_changed();
   }
 
   fn play_from_queue(&self) -> bool {
-    let queued = self.play_queue.borrow_mut().pop_front();
-    if let Some(item) = queued {
+    if let Some(item) = pop_queue_front() {
+      self.notify_queue_changed();
       match item {
-        QueuedItem::Track(filename) => {
-          // Find the track in the playlist and play it
+        QueueItem::Track(track) => {
           let n_items = self.playlist_store.n_items();
           for i in 0..n_items {
             if let Some(playlist_item) = self.playlist_store.item(i) {
               if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
-                if let Ok(track) = obj.try_borrow::<Rc<Track>>() {
-                  if track.filename == filename {
+                if let Ok(t) = obj.try_borrow::<Rc<Track>>() {
+                  if t.filename == track.filename {
                     return self.play_index(i);
                   }
                 }
@@ -419,14 +435,13 @@ impl PlaybackController {
             }
           }
         }
-        QueuedItem::Video(video_id) => {
-          // Find the video in the playlist and play it
+        QueueItem::Video(video) => {
           let n_items = self.playlist_store.n_items();
           for i in 0..n_items {
             if let Some(playlist_item) = self.playlist_store.item(i) {
               if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
-                if let Ok(video) = obj.try_borrow::<Rc<YouTubeVideo>>() {
-                  if video.id == video_id {
+                if let Ok(v) = obj.try_borrow::<Rc<YouTubeVideo>>() {
+                  if v.id == video.id {
                     return self.play_index(i);
                   }
                 }
@@ -441,7 +456,7 @@ impl PlaybackController {
 
   pub fn play_next(&self) -> bool {
     // Check queue first
-    if !self.play_queue.borrow().is_empty() {
+    if queue_len() > 0 {
       return self.play_from_queue();
     }
 
@@ -516,5 +531,9 @@ impl PlaybackController {
   pub fn is_video_playing(&self, video_id: i32) -> bool {
     let stats = self.play_stats.borrow();
     matches!(&*stats, CurrentPlayStats::Video { id, .. } if *id == video_id)
+  }
+
+  pub fn get_queue_items(&self) -> Vec<QueueItem> {
+    fml9000::get_queue_items()
   }
 }
