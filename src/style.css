@@ -10,11 +10,6 @@
   font-style: italic;
 }
 
-.playing {
-  font-weight: bold;
-  color: @accent_color;
-}
-
 .repeat-active {
   color: @accent_color;
 }

@@ -55,13 +55,4 @@ impl GridCell {
       *id_ref.borrow_mut() = value;
     }
   }
-
-  pub fn set_playing(&self, playing: bool) {
-    let label = &self.imp().name;
-    if playing {
-      label.add_css_class("playing");
-    } else {
-      label.remove_css_class("playing");
-    }
-  }
 }

@@ -89,7 +89,6 @@ fn create_sorter(extract: impl Fn(&PlaylistItem) -> String + 'static) -> CustomS
 
 fn create_column(
   settings: Rc<RefCell<FmlSettings>>,
-  playback_controller: Rc<PlaybackController>,
   cb: impl Fn(&PlaylistItem) -> String + 'static,
 ) -> SignalListItemFactory {
   let factory = SignalListItemFactory::new();
@@ -105,11 +104,6 @@ fn create_column(
       cell.set_entry(&Entry {
         name: cb(&playlist_item),
       });
-      let is_playing = match &playlist_item {
-        PlaylistItem::Track(t) => playback_controller.is_track_playing(&t.filename),
-        PlaylistItem::Video(v) => playback_controller.is_video_playing(v.id),
-      };
-      cell.set_playing(is_playing);
     }
   });
   factory.connect_unbind(move |_factory, item| {
@@ -117,7 +111,6 @@ fn create_column(
     if let Some(child) = item.child() {
       if let Some(cell) = child.downcast_ref::<crate::grid_cell::GridCell>() {
         cell.set_entry(&Entry { name: String::new() });
-        cell.set_playing(false);
       }
     }
   });
@@ -183,7 +176,7 @@ pub fn create_playlist_view(
     .build();
 
 
-  let artistalbum = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let artistalbum = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => {
       format!(
         "{} // {}",
@@ -197,12 +190,12 @@ pub fn create_playlist_view(
     }
   });
 
-  let track_num = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let track_num = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
     PlaylistItem::Video(_) => String::new(),
   });
 
-  let duration = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let duration = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => format_duration(r.duration_seconds),
     PlaylistItem::Video(v) => format_duration(v.duration_seconds),
   });
@@ -221,17 +214,17 @@ pub fn create_playlist_view(
     get_duration(obj1).cmp(&get_duration(obj2)).into()
   });
 
-  let title = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let title = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.title.clone().unwrap_or_default(),
     PlaylistItem::Video(v) => v.title.clone(),
   });
 
-  let filename = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let filename = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => r.filename.clone(),
     PlaylistItem::Video(v) => v.video_id.clone(),
   });
 
-  let date_added = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let date_added = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => format_date(r.added),
     PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
   });
@@ -241,7 +234,7 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
   });
 
-  let last_played = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let last_played = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => format_date(r.last_played),
     PlaylistItem::Video(v) => format_date(v.last_played),
   });
@@ -251,7 +244,7 @@ pub fn create_playlist_view(
     PlaylistItem::Video(v) => format_date(v.last_played),
   });
 
-  let play_count = create_column(Rc::clone(&settings), Rc::clone(&playback_controller), |item| match item {
+  let play_count = create_column(Rc::clone(&settings), |item| match item {
     PlaylistItem::Track(r) => {
       if r.play_count > 0 {
         r.play_count.to_string()
@@ -852,9 +845,11 @@ pub fn create_playlist_view(
 
   playlist_columnview.add_controller(gesture);
 
-  // Register callback to scroll to playing track when it changes
+  // Register callback to scroll to and select playing track when it changes
   let columnview_for_scroll = playlist_columnview.clone();
+  let selection_for_scroll = playlist_sel.clone();
   playback_controller.set_on_track_changed(Some(Rc::new(move |index| {
+    selection_for_scroll.select_item(index, true);
     columnview_for_scroll.scroll_to(index, None::<&ColumnViewColumn>, gtk::ListScrollFlags::FOCUS, None);
   })));
 

@@ -526,14 +526,4 @@ impl PlaybackController {
 
     self.play_index(prev_index)
   }
-
-  pub fn is_track_playing(&self, filename: &str) -> bool {
-    let stats = self.play_stats.borrow();
-    matches!(&*stats, CurrentPlayStats::Track { filename: f, .. } if f == filename)
-  }
-
-  pub fn is_video_playing(&self, video_id: i32) -> bool {
-    let stats = self.play_stats.borrow();
-    matches!(&*stats, CurrentPlayStats::Video { id, .. } if *id == video_id)
-  }
 }
