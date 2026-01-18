@@ -30,13 +30,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    recently_played (filename) {
-        filename -> Text,
-        timestamp -> Nullable<Timestamp>,
-    }
-}
-
-diesel::table! {
     tracks (filename) {
         filename -> Text,
         title -> Nullable<Text>,
@@ -77,6 +70,7 @@ diesel::table! {
         fetched_at -> Timestamp,
         play_count -> Integer,
         last_played -> Nullable<Timestamp>,
+        added -> Nullable<Timestamp>,
     }
 }
 
@@ -91,7 +85,6 @@ diesel::allow_tables_to_appear_in_same_query!(
   playback_queue,
   playlist_tracks,
   playlists,
-  recently_played,
   tracks,
   youtube_channels,
   youtube_videos,

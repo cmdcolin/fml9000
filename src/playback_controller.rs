@@ -365,10 +365,6 @@ impl PlaybackController {
     self.repeat_mode.get()
   }
 
-  pub fn set_repeat_mode(&self, mode: RepeatMode) {
-    self.repeat_mode.set(mode);
-  }
-
   pub fn cycle_repeat_mode(&self) -> RepeatMode {
     let next = match self.repeat_mode.get() {
       RepeatMode::Off => RepeatMode::All,
@@ -379,10 +375,6 @@ impl PlaybackController {
     next
   }
 
-  pub fn current_index(&self) -> Option<u32> {
-    self.current_index.get()
-  }
-
   pub fn queue_track(&self, filename: String) {
     add_track_to_queue(&filename);
     self.notify_queue_changed();
@@ -391,10 +383,6 @@ impl PlaybackController {
   pub fn queue_video(&self, video_id: i32) {
     add_video_to_queue(video_id);
     self.notify_queue_changed();
-  }
-
-  pub fn get_queue_len(&self) -> usize {
-    queue_len()
   }
 
   pub fn set_on_queue_changed(&self, callback: Option<Rc<dyn Fn()>>) {
@@ -531,9 +519,5 @@ impl PlaybackController {
   pub fn is_video_playing(&self, video_id: i32) -> bool {
     let stats = self.play_stats.borrow();
     matches!(&*stats, CurrentPlayStats::Video { id, .. } if *id == video_id)
-  }
-
-  pub fn get_queue_items(&self) -> Vec<QueueItem> {
-    fml9000::get_queue_items()
   }
 }

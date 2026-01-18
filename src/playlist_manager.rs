@@ -6,11 +6,11 @@ use fml9000::QueueItem;
 use crate::settings::FmlSettings;
 use crate::youtube_add_dialog;
 use adw::prelude::*;
-use fml9000::models::{Track, YouTubeVideo};
+use fml9000::models::YouTubeVideo;
 use fml9000::{
   add_track_to_playlist, add_video_to_playlist, delete_playlist, get_playlist_items,
-  get_user_playlists, get_videos_for_channel, get_youtube_channels, load_playlist_store,
-  load_recently_played, rename_playlist, UserPlaylistItem,
+  get_queue_items, get_user_playlists, get_videos_for_channel, get_youtube_channels,
+  load_recently_added_items, load_recently_played_items, rename_playlist,
 };
 use gtk::gdk;
 use gtk::gio::ListStore;
@@ -37,7 +37,6 @@ struct Playlist {
 pub fn create_playlist_manager(
   playlist_mgr_store: &ListStore,
   main_playlist_store: ListStore,
-  all_tracks: Rc<Vec<Rc<Track>>>,
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
   current_playlist_id: Rc<RefCell<Option<i32>>>,
@@ -107,7 +106,7 @@ pub fn create_playlist_manager(
                     *current_pid_for_drop.borrow_mut() = Some(playlist_id);
                     main_store_for_drop.remove_all();
                     if let Ok(items) = get_playlist_items(playlist_id) {
-                      load_user_playlist_items(&items, &main_store_for_drop);
+                      load_queue_items(&items, &main_store_for_drop);
                     }
                     break;
                   }
@@ -173,12 +172,10 @@ pub fn create_playlist_manager(
   columnview.append_column(&column);
 
   let main_playlist_store_clone = main_playlist_store.clone();
-  let all_tracks_clone = all_tracks.clone();
   let current_playlist_id_clone = current_playlist_id.clone();
   let playback_controller_clone = playback_controller.clone();
   let is_viewing_playback_queue_clone = is_viewing_playback_queue.clone();
   let main_playlist_store_for_callback = main_playlist_store.clone();
-  let playback_controller_for_callback = playback_controller.clone();
   selection.connect_selection_changed(move |sel, _, _| {
     if let Some(item) = sel.selected_item() {
       let obj = item.downcast::<BoxedAnyObject>().unwrap();
@@ -191,11 +188,10 @@ pub fn create_playlist_manager(
 
       if is_playback_queue {
         let store = main_playlist_store_for_callback.clone();
-        let pc = playback_controller_for_callback.clone();
         playback_controller_clone.set_on_queue_changed(Some(Rc::new(move || {
           store.remove_all();
-          let queue_items = pc.get_queue_items();
-          load_queue_items(&queue_items, &store);
+          let items = get_queue_items();
+          load_queue_items(&items, &store);
         })));
       } else {
         playback_controller_clone.set_on_queue_changed(None);
@@ -204,17 +200,18 @@ pub fn create_playlist_manager(
       match &playlist.playlist_type {
         PlaylistType::RecentlyAdded => {
           *current_playlist_id_clone.borrow_mut() = None;
-          load_playlist_store(all_tracks_clone.iter(), &main_playlist_store_clone);
+          let items = load_recently_added_items(0);
+          load_queue_items(&items, &main_playlist_store_clone);
         }
         PlaylistType::RecentlyPlayed => {
           *current_playlist_id_clone.borrow_mut() = None;
-          let recent = load_recently_played(100);
-          load_playlist_store(recent.iter(), &main_playlist_store_clone);
+          let items = load_recently_played_items(100);
+          load_queue_items(&items, &main_playlist_store_clone);
         }
         PlaylistType::PlaybackQueue => {
           *current_playlist_id_clone.borrow_mut() = None;
-          let queue_items = playback_controller_clone.get_queue_items();
-          load_queue_items(&queue_items, &main_playlist_store_clone);
+          let items = get_queue_items();
+          load_queue_items(&items, &main_playlist_store_clone);
         }
         PlaylistType::YouTubeChannel(id, _) => {
           *current_playlist_id_clone.borrow_mut() = None;
@@ -225,7 +222,7 @@ pub fn create_playlist_manager(
         PlaylistType::UserPlaylist(id, _) => {
           *current_playlist_id_clone.borrow_mut() = Some(*id);
           if let Ok(items) = get_playlist_items(*id) {
-            load_user_playlist_items(&items, &main_playlist_store_clone);
+            load_queue_items(&items, &main_playlist_store_clone);
           }
         }
       }
@@ -390,19 +387,6 @@ fn populate_playlist_store(store: &ListStore) {
 fn load_youtube_videos(videos: &[Rc<YouTubeVideo>], store: &ListStore) {
   for video in videos {
     store.append(&BoxedAnyObject::new(video.clone()));
-  }
-}
-
-fn load_user_playlist_items(items: &[UserPlaylistItem], store: &ListStore) {
-  for item in items {
-    match item {
-      UserPlaylistItem::Track(track) => {
-        store.append(&BoxedAnyObject::new(track.clone()));
-      }
-      UserPlaylistItem::Video(video) => {
-        store.append(&BoxedAnyObject::new(video.clone()));
-      }
-    }
   }
 }
 

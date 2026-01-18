@@ -1,4 +1,3 @@
-mod chunked_iterator;
 pub mod models;
 pub mod schema;
 
@@ -14,15 +13,12 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::Accessor;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use walkdir::WalkDir;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
-
-pub fn run_migration(conn: &mut SqliteConnection) {
-  conn.run_pending_migrations(MIGRATIONS).unwrap();
-}
 
 #[derive(Hash, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct Facet {
@@ -36,7 +32,7 @@ fn get_project_dirs() -> Option<ProjectDirs> {
   ProjectDirs::from("com", "github", "fml9000")
 }
 
-pub fn connect_db() -> Result<SqliteConnection, String> {
+fn get_database_url() -> Result<String, String> {
   let proj_dirs =
     get_project_dirs().ok_or_else(|| "Could not determine config directory".to_string())?;
   let config_dir = proj_dirs.config_dir();
@@ -46,87 +42,49 @@ pub fn connect_db() -> Result<SqliteConnection, String> {
   let path_str = path
     .to_str()
     .ok_or_else(|| "Database path contains invalid UTF-8".to_string())?;
-  let database_url = format!("sqlite://{}", path_str);
+  Ok(format!("sqlite://{}", path_str))
+}
+
+/// Initialize the database and run migrations. Call once at startup.
+pub fn init_db() -> Result<(), String> {
+  let database_url = get_database_url()?;
   let mut conn = SqliteConnection::establish(&database_url)
     .map_err(|e| format!("Error connecting to database: {e}"))?;
   conn
     .run_pending_migrations(MIGRATIONS)
     .map_err(|e| format!("Failed to run migrations: {e}"))?;
-  Ok(conn)
+  Ok(())
 }
 
-fn hashset(data: &[Rc<Track>]) -> HashSet<&String> {
-  data.iter().map(|elt| &elt.filename).collect()
+thread_local! {
+  static DB_CONNECTION: RefCell<Option<SqliteConnection>> = const { RefCell::new(None) };
 }
 
-pub fn run_scan(folder: &str, rows: &[Rc<Track>]) {
-  let existing_files = hashset(rows);
-  let mut conn = match connect_db() {
-    Ok(c) => c,
-    Err(e) => {
-      eprintln!("Warning: Could not connect to database for scanning: {e}");
-      return;
+/// Get a database connection. Uses a cached thread-local connection.
+pub fn connect_db() -> Result<SqliteConnection, String> {
+  let database_url = get_database_url()?;
+  SqliteConnection::establish(&database_url)
+    .map_err(|e| format!("Error connecting to database: {e}"))
+}
+
+/// Execute a database operation using a cached thread-local connection.
+/// This avoids opening a new connection for each operation.
+pub fn with_db<T, F>(f: F) -> Result<T, String>
+where
+  F: FnOnce(&mut SqliteConnection) -> Result<T, String>,
+{
+  DB_CONNECTION.with(|cell| {
+    let mut conn_opt = cell.borrow_mut();
+    if conn_opt.is_none() {
+      let database_url = get_database_url()?;
+      let conn = SqliteConnection::establish(&database_url)
+        .map_err(|e| format!("Error connecting to database: {e}"))?;
+      *conn_opt = Some(conn);
     }
-  };
-  let chunk_size = 20;
-
-  let walker = WalkDir::new(folder)
-    .into_iter()
-    .filter_map(|e| e.ok());
-
-  for chunk in chunked_iterator::ChunkedIterator::new(walker, chunk_size) {
-    for entry in chunk {
-      if !entry.file_type().is_file() {
-        continue;
-      }
-
-      let path_str = entry.path().display().to_string();
-      if existing_files.contains(&path_str) {
-        continue;
-      }
-
-      let Ok(probe) = Probe::open(&path_str) else {
-        continue;
-      };
-
-      let Ok(tagged_file) = probe.read() else {
-        continue;
-      };
-
-      let tag = tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag());
-
-      if let Some(t) = tag {
-        let duration_seconds = tagged_file
-          .properties()
-          .duration()
-          .as_secs()
-          .try_into()
-          .ok();
-
-        let _ = diesel::insert_into(tracks::table)
-          .values(NewTrack {
-            filename: &path_str,
-            artist: t.artist().as_deref(),
-            album: t.album().as_deref(),
-            album_artist: t.get_string(&ItemKey::AlbumArtist),
-            title: t.title().as_deref(),
-            track: t.get_string(&ItemKey::TrackNumber),
-            genre: t.genre().as_deref(),
-            duration_seconds,
-          })
-          .execute(&mut conn);
-      }
-    }
-  }
+    f(conn_opt.as_mut().unwrap())
+  })
 }
 
-pub fn run_scan_folders(folders: &[String], rows: &[Rc<Track>]) {
-  for folder in folders {
-    run_scan(folder, rows);
-  }
-}
 
 /// Progress update sent during scanning
 #[derive(Clone)]
@@ -249,62 +207,125 @@ pub fn run_scan_with_progress(
 }
 
 pub fn add_track_to_recently_played(path: &str) {
-  use self::schema::recently_played;
+  use self::schema::tracks::dsl;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
-  let _ = diesel::replace_into(recently_played::table)
-    .values(NewRecentlyPlayed { filename: path })
-    .execute(&mut conn);
+  let _ = with_db(|conn| {
+    diesel::update(dsl::tracks.filter(dsl::filename.eq(path)))
+      .set(dsl::last_played.eq(diesel::dsl::now))
+      .execute(conn)
+      .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn update_track_play_stats(path: &str) {
   use self::schema::tracks::dsl;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
-  let _ = diesel::update(dsl::tracks.filter(dsl::filename.eq(path)))
-    .set((
-      dsl::play_count.eq(dsl::play_count + 1),
-      dsl::last_played.eq(diesel::dsl::now),
-    ))
-    .execute(&mut conn);
+  let _ = with_db(|conn| {
+    diesel::update(dsl::tracks.filter(dsl::filename.eq(path)))
+      .set((
+        dsl::play_count.eq(dsl::play_count + 1),
+        dsl::last_played.eq(diesel::dsl::now),
+      ))
+      .execute(conn)
+      .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn update_video_play_stats(video_id: i32) {
   use self::schema::youtube_videos::dsl;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
-  let _ = diesel::update(dsl::youtube_videos.filter(dsl::id.eq(video_id)))
-    .set((
-      dsl::play_count.eq(dsl::play_count + 1),
-      dsl::last_played.eq(diesel::dsl::now),
-    ))
-    .execute(&mut conn);
+  let _ = with_db(|conn| {
+    diesel::update(dsl::youtube_videos.filter(dsl::id.eq(video_id)))
+      .set((
+        dsl::play_count.eq(dsl::play_count + 1),
+        dsl::last_played.eq(diesel::dsl::now),
+      ))
+      .execute(conn)
+      .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
-pub fn load_recently_played(limit: i64) -> Vec<Rc<Track>> {
-  use self::schema::recently_played::dsl as rp;
+pub fn load_recently_played_items(limit: i64) -> Vec<QueueItem> {
   use self::schema::tracks::dsl as t;
+  use self::schema::youtube_videos;
 
   let Ok(mut conn) = connect_db() else {
     return Vec::new();
   };
 
-  t::tracks
-    .inner_join(rp::recently_played.on(t::filename.eq(rp::filename)))
-    .order(rp::timestamp.desc())
-    .limit(limit)
+  let tracks: Vec<Track> = t::tracks
+    .filter(t::last_played.is_not_null())
     .select(Track::as_select())
-    .load::<Track>(&mut conn)
-    .unwrap_or_default()
-    .into_iter()
-    .map(Rc::new)
-    .collect()
+    .load(&mut conn)
+    .unwrap_or_default();
+
+  let videos: Vec<models::YouTubeVideo> = youtube_videos::table
+    .filter(youtube_videos::last_played.is_not_null())
+    .select(models::YouTubeVideo::as_select())
+    .load(&mut conn)
+    .unwrap_or_default();
+
+  let mut items: Vec<(QueueItem, chrono::NaiveDateTime)> = Vec::new();
+
+  for track in tracks {
+    if let Some(last_played) = track.last_played {
+      items.push((QueueItem::Track(Rc::new(track)), last_played));
+    }
+  }
+
+  for video in videos {
+    if let Some(last_played) = video.last_played {
+      items.push((QueueItem::Video(Rc::new(video)), last_played));
+    }
+  }
+
+  items.sort_by(|a, b| b.1.cmp(&a.1));
+  if limit > 0 {
+    items.truncate(limit as usize);
+  }
+  items.into_iter().map(|(item, _)| item).collect()
+}
+
+pub fn load_recently_added_items(limit: i64) -> Vec<QueueItem> {
+  use self::schema::tracks::dsl as t;
+  use self::schema::youtube_videos;
+
+  let Ok(mut conn) = connect_db() else {
+    return Vec::new();
+  };
+
+  let tracks: Vec<Track> = t::tracks
+    .select(Track::as_select())
+    .order(t::added.desc())
+    .load(&mut conn)
+    .unwrap_or_default();
+
+  let videos: Vec<models::YouTubeVideo> = youtube_videos::table
+    .select(models::YouTubeVideo::as_select())
+    .order(youtube_videos::added.desc())
+    .load(&mut conn)
+    .unwrap_or_default();
+
+  let mut items: Vec<(QueueItem, chrono::NaiveDateTime)> = Vec::new();
+
+  for track in tracks {
+    let added = track.added.unwrap_or_default();
+    items.push((QueueItem::Track(Rc::new(track)), added));
+  }
+
+  for video in videos {
+    let added = video.added.unwrap_or(video.fetched_at);
+    items.push((QueueItem::Video(Rc::new(video)), added));
+  }
+
+  items.sort_by(|a, b| b.1.cmp(&a.1));
+  if limit > 0 {
+    items.truncate(limit as usize);
+  }
+  items.into_iter().map(|(item, _)| item).collect()
 }
 
 pub enum QueueItem {
@@ -315,73 +336,73 @@ pub enum QueueItem {
 pub fn add_track_to_queue(track_filename: &str) {
   use self::schema::playback_queue;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
+  let _ = with_db(|conn| {
+    let max_position: Option<i32> = playback_queue::table
+      .select(diesel::dsl::max(playback_queue::position))
+      .first(conn)
+      .unwrap_or(None);
 
-  let max_position: Option<i32> = playback_queue::table
-    .select(diesel::dsl::max(playback_queue::position))
-    .first(&mut conn)
-    .unwrap_or(None);
+    let new_position = max_position.unwrap_or(-1) + 1;
 
-  let new_position = max_position.unwrap_or(-1) + 1;
-
-  let _ = diesel::insert_into(playback_queue::table)
-    .values(models::NewPlaybackQueueItem {
-      position: new_position,
-      track_filename: Some(track_filename),
-      youtube_video_id: None,
-    })
-    .execute(&mut conn);
+    diesel::insert_into(playback_queue::table)
+      .values(models::NewPlaybackQueueItem {
+        position: new_position,
+        track_filename: Some(track_filename),
+        youtube_video_id: None,
+      })
+      .execute(conn)
+      .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn add_video_to_queue(video_id: i32) {
   use self::schema::playback_queue;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
+  let _ = with_db(|conn| {
+    let max_position: Option<i32> = playback_queue::table
+      .select(diesel::dsl::max(playback_queue::position))
+      .first(conn)
+      .unwrap_or(None);
 
-  let max_position: Option<i32> = playback_queue::table
-    .select(diesel::dsl::max(playback_queue::position))
-    .first(&mut conn)
-    .unwrap_or(None);
+    let new_position = max_position.unwrap_or(-1) + 1;
 
-  let new_position = max_position.unwrap_or(-1) + 1;
-
-  let _ = diesel::insert_into(playback_queue::table)
-    .values(models::NewPlaybackQueueItem {
-      position: new_position,
-      track_filename: None,
-      youtube_video_id: Some(video_id),
-    })
-    .execute(&mut conn);
+    diesel::insert_into(playback_queue::table)
+      .values(models::NewPlaybackQueueItem {
+        position: new_position,
+        track_filename: None,
+        youtube_video_id: Some(video_id),
+      })
+      .execute(conn)
+      .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn remove_track_from_queue(track_filename: &str) {
   use self::schema::playback_queue;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
-
-  let _ = diesel::delete(
-    playback_queue::table.filter(playback_queue::track_filename.eq(track_filename)),
-  )
-  .execute(&mut conn);
+  let _ = with_db(|conn| {
+    diesel::delete(
+      playback_queue::table.filter(playback_queue::track_filename.eq(track_filename)),
+    )
+    .execute(conn)
+    .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn remove_video_from_queue(video_id: i32) {
   use self::schema::playback_queue;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
-
-  let _ = diesel::delete(
-    playback_queue::table.filter(playback_queue::youtube_video_id.eq(video_id)),
-  )
-  .execute(&mut conn);
+  let _ = with_db(|conn| {
+    diesel::delete(
+      playback_queue::table.filter(playback_queue::youtube_video_id.eq(video_id)),
+    )
+    .execute(conn)
+    .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn pop_queue_front() -> Option<QueueItem> {
@@ -412,54 +433,66 @@ pub fn pop_queue_front() -> Option<QueueItem> {
 }
 
 pub fn get_queue_items() -> Vec<QueueItem> {
-  use self::schema::playback_queue;
+  use self::schema::{playback_queue, tracks, youtube_videos};
 
   let Ok(mut conn) = connect_db() else {
     return Vec::new();
   };
 
-  let items: Vec<models::PlaybackQueueItem> = playback_queue::table
+  let queue_with_tracks: Vec<(models::PlaybackQueueItem, Option<Track>)> = playback_queue::table
+    .left_join(tracks::table.on(playback_queue::track_filename.eq(tracks::filename.nullable())))
+    .select((models::PlaybackQueueItem::as_select(), Option::<Track>::as_select()))
+    .order(playback_queue::position.asc())
+    .load(&mut conn)
+    .unwrap_or_default();
+
+  let queue_with_videos: Vec<(models::PlaybackQueueItem, Option<models::YouTubeVideo>)> = playback_queue::table
+    .left_join(youtube_videos::table.on(playback_queue::youtube_video_id.eq(youtube_videos::id.nullable())))
+    .select((models::PlaybackQueueItem::as_select(), Option::<models::YouTubeVideo>::as_select()))
     .order(playback_queue::position.asc())
     .load(&mut conn)
     .unwrap_or_default();
 
   let mut result = Vec::new();
-  for item in items {
-    if let Some(filename) = item.track_filename {
-      if let Some(track) = load_track_by_filename(&filename) {
-        result.push(QueueItem::Track(track));
-      }
-    }
-    if let Some(video_id) = item.youtube_video_id {
-      if let Some(video) = load_video_by_id(video_id) {
-        result.push(QueueItem::Video(video));
-      }
+
+  for (queue_item, track_opt) in queue_with_tracks {
+    if let Some(track) = track_opt {
+      result.push((queue_item.position, QueueItem::Track(Rc::new(track))));
     }
   }
-  result
+
+  for (queue_item, video_opt) in queue_with_videos {
+    if let Some(video) = video_opt {
+      result.push((queue_item.position, QueueItem::Video(Rc::new(video))));
+    }
+  }
+
+  result.sort_by_key(|(pos, _)| *pos);
+  result.into_iter().map(|(_, item)| item).collect()
 }
 
 pub fn clear_queue() {
   use self::schema::playback_queue;
 
-  let Ok(mut conn) = connect_db() else {
-    return;
-  };
-
-  let _ = diesel::delete(playback_queue::table).execute(&mut conn);
+  let _ = with_db(|conn| {
+    diesel::delete(playback_queue::table)
+      .execute(conn)
+      .map_err(|e| e.to_string())?;
+    Ok(())
+  });
 }
 
 pub fn queue_len() -> usize {
   use self::schema::playback_queue;
 
-  let Ok(mut conn) = connect_db() else {
-    return 0;
-  };
-
-  playback_queue::table
-    .count()
-    .get_result::<i64>(&mut conn)
-    .unwrap_or(0) as usize
+  with_db(|conn| {
+    playback_queue::table
+      .count()
+      .get_result::<i64>(conn)
+      .map(|c| c as usize)
+      .map_err(|e| e.to_string())
+  })
+  .unwrap_or(0)
 }
 
 pub fn load_tracks() -> Result<Vec<Rc<Track>>, String> {
@@ -719,43 +752,41 @@ pub fn add_video_to_playlist(playlist_id: i32, video_id: i32) -> Result<(), Stri
   Ok(())
 }
 
-pub enum UserPlaylistItem {
-  Track(Rc<Track>),
-  Video(Rc<models::YouTubeVideo>),
-}
-
-pub fn get_playlist_items(playlist_id: i32) -> Result<Vec<UserPlaylistItem>, String> {
+pub fn get_playlist_items(playlist_id: i32) -> Result<Vec<QueueItem>, String> {
   let mut conn = connect_db()?;
 
-  let items: Vec<models::PlaylistTrack> = playlist_tracks::table
+  let items_with_tracks: Vec<(models::PlaylistTrack, Option<Track>)> = playlist_tracks::table
     .filter(playlist_tracks::playlist_id.eq(playlist_id))
+    .left_join(tracks::table.on(playlist_tracks::track_filename.eq(tracks::filename.nullable())))
+    .select((models::PlaylistTrack::as_select(), Option::<Track>::as_select()))
     .order(playlist_tracks::position.asc())
     .load(&mut conn)
     .map_err(|e| format!("Failed to load playlist items: {e}"))?;
 
-  let mut result = Vec::new();
-  for item in items {
-    if let Some(filename) = &item.track_filename {
-      let track: Option<Track> = tracks::table
-        .filter(tracks::filename.eq(filename))
-        .first(&mut conn)
-        .ok();
-      if let Some(t) = track {
-        result.push(UserPlaylistItem::Track(Rc::new(t)));
-      }
-    }
-    if let Some(vid_id) = item.youtube_video_id {
-      let video: Option<models::YouTubeVideo> = youtube_videos::table
-        .filter(youtube_videos::id.eq(vid_id))
-        .first(&mut conn)
-        .ok();
-      if let Some(v) = video {
-        result.push(UserPlaylistItem::Video(Rc::new(v)));
-      }
+  let items_with_videos: Vec<(models::PlaylistTrack, Option<models::YouTubeVideo>)> = playlist_tracks::table
+    .filter(playlist_tracks::playlist_id.eq(playlist_id))
+    .left_join(youtube_videos::table.on(playlist_tracks::youtube_video_id.eq(youtube_videos::id.nullable())))
+    .select((models::PlaylistTrack::as_select(), Option::<models::YouTubeVideo>::as_select()))
+    .order(playlist_tracks::position.asc())
+    .load(&mut conn)
+    .map_err(|e| format!("Failed to load playlist videos: {e}"))?;
+
+  let mut result: Vec<(i32, QueueItem)> = Vec::new();
+
+  for (playlist_item, track_opt) in items_with_tracks {
+    if let Some(track) = track_opt {
+      result.push((playlist_item.position, QueueItem::Track(Rc::new(track))));
     }
   }
 
-  Ok(result)
+  for (playlist_item, video_opt) in items_with_videos {
+    if let Some(video) = video_opt {
+      result.push((playlist_item.position, QueueItem::Video(Rc::new(video))));
+    }
+  }
+
+  result.sort_by_key(|(pos, _)| *pos);
+  Ok(result.into_iter().map(|(_, item)| item).collect())
 }
 
 pub fn delete_playlist(id: i32) -> Result<(), String> {

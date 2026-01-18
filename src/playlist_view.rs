@@ -7,7 +7,7 @@ use chrono::NaiveDateTime;
 use fml9000::models::{Track, YouTubeVideo};
 use fml9000::{
   get_playlist_items, reorder_playlist_items, remove_track_from_playlist,
-  remove_video_from_playlist, PlaylistItemIdentifier, UserPlaylistItem,
+  remove_video_from_playlist, PlaylistItemIdentifier, QueueItem,
 };
 use gtk::gdk::{self, Key};
 use gtk::gio::ListStore;
@@ -516,10 +516,10 @@ pub fn create_playlist_view(
       if let Ok(items) = get_playlist_items(playlist_id) {
         for item in items {
           match item {
-            UserPlaylistItem::Track(track) => {
+            QueueItem::Track(track) => {
               store_for_drop.append(&BoxedAnyObject::new(track));
             }
-            UserPlaylistItem::Video(video) => {
+            QueueItem::Video(video) => {
               store_for_drop.append(&BoxedAnyObject::new(video));
             }
           }

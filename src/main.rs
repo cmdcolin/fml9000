@@ -183,6 +183,11 @@ fn main() {
 fn app_main(application: &Application) {
   load_css::load_css();
 
+  // Initialize database and run migrations once at startup
+  if let Err(e) = fml9000::init_db() {
+    eprintln!("Failed to initialize database: {e}");
+  }
+
   // Add local img directory to icon search path for dev mode
   let icon_theme = gtk::IconTheme::for_display(&gtk::gdk::Display::default().unwrap());
   if let Ok(exe_path) = std::env::current_exe() {
@@ -281,7 +286,6 @@ fn app_main(application: &Application) {
   let (playlist_mgr_view, playlist_mgr_selection) = create_playlist_manager(
     &playlist_mgr_store,
     playlist_store.clone(),
-    Rc::clone(&tracks),
     Rc::clone(&playback_controller),
     Rc::clone(&settings),
     Rc::clone(&current_playlist_id),
