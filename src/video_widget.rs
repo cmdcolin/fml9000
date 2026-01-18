@@ -1,7 +1,7 @@
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Align, Box as GtkBox, Label, MediaFile, Orientation, Spinner, Stack, Video};
+use gtk::{Align, Box as GtkBox, GraphicsOffloadEnabled, Label, MediaFile, Orientation, Spinner, Stack, Video};
 use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
@@ -26,6 +26,7 @@ impl VideoWidget {
         video.set_hexpand(true);
         video.set_vexpand(true);
         video.set_autoplay(true);
+        video.set_graphics_offload(GraphicsOffloadEnabled::Enabled);
 
         // Create loading view with spinner
         let loading_box = GtkBox::new(Orientation::Vertical, 12);
