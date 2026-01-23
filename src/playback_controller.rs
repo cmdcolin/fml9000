@@ -247,6 +247,15 @@ impl PlaybackController {
     false
   }
 
+  pub fn show_track_album_art(&self, track: &Track) {
+    if !self.try_set_embedded_cover_art(&track.filename) {
+      let mut cover_path = PathBuf::from(&track.filename);
+      cover_path.pop();
+      cover_path.push("cover.jpg");
+      self.album_art.set_filename(Some(cover_path));
+    }
+  }
+
   pub fn play_youtube_video(&self, video: &YouTubeVideo, _audio_only: bool) {
     self.audio.stop();
     self.playback_source.set(PlaybackSource::YouTube);

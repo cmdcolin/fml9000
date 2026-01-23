@@ -215,6 +215,15 @@ impl VideoWidget {
             false
         }
     }
+
+    pub fn bind_to_other(&self, other: &Rc<VideoWidget>) {
+        self.video.bind_property("media-stream", &other.video, "media-stream")
+            .sync_create()
+            .build();
+        self.stack.bind_property("visible-child-name", &other.stack, "visible-child-name")
+            .sync_create()
+            .build();
+    }
 }
 
 impl Default for VideoWidget {

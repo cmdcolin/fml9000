@@ -853,6 +853,26 @@ pub fn create_playlist_view(
     columnview_for_scroll.scroll_to(index, None::<&ColumnViewColumn>, gtk::ListScrollFlags::FOCUS, None);
   })));
 
+  // Show album art when selection changes (for local tracks only)
+  let store_for_selection = playlist_store.clone();
+  let pc_for_selection = playback_controller.clone();
+  playlist_sel.connect_selection_changed(move |sel, _, _| {
+    let selection = sel.selection();
+    if selection.is_empty() {
+      return;
+    }
+    let pos = selection.minimum();
+    if let Some(item) = store_for_selection.item(pos) {
+      if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
+        if let Some(playlist_item) = try_get_item(&obj) {
+          if let PlaylistItem::Track(track) = playlist_item {
+            pc_for_selection.show_track_album_art(&track);
+          }
+        }
+      }
+    }
+  });
+
   ScrolledWindow::builder()
     .child(&playlist_columnview)
     .build()

@@ -21,7 +21,7 @@ use fml9000::{load_facet_store, load_playlist_store, load_tracks};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::gdk::Key;
-use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Orientation, Paned, Picture, Stack};
+use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Label, Notebook, Orientation, Paned, Picture, Stack};
 use video_widget::VideoWidget;
 use header_bar::create_header_bar;
 use playback_controller::{PlaybackController, PlaybackSource};
@@ -347,6 +347,44 @@ fn app_main(application: &Application) {
     }
   }
 
+  // Create Art tab content - a Picture that mirrors the album art
+  let art_tab_picture = Picture::builder()
+    .vexpand(true)
+    .hexpand(true)
+    .content_fit(ContentFit::Contain)
+    .build();
+
+  // Bind the art tab picture to show the same paintable as album_art
+  album_art.bind_property("paintable", &art_tab_picture, "paintable")
+    .sync_create()
+    .build();
+
+  // Create video widget for art tab
+  let art_tab_video = VideoWidget::new();
+  video_widget.bind_to_other(&art_tab_video);
+
+  // Create a stack for art tab to switch between picture and video
+  let art_tab_stack = Stack::new();
+  art_tab_stack.add_named(&art_tab_picture, Some("album_art"));
+  art_tab_stack.add_named(art_tab_video.widget(), Some("video"));
+  art_tab_stack.set_visible_child_name("album_art");
+  art_tab_stack.set_vexpand(true);
+  art_tab_stack.set_hexpand(true);
+
+  // Sync the visible child between media_stack and art_tab_stack
+  media_stack.bind_property("visible-child-name", &art_tab_stack, "visible-child-name")
+    .sync_create()
+    .build();
+
+  // Create notebook with tabs
+  let notebook = Notebook::builder()
+    .vexpand(true)
+    .hexpand(true)
+    .build();
+
+  notebook.append_page(&main_pane, Some(&Label::new(Some("Main"))));
+  notebook.append_page(&art_tab_stack, Some(&Label::new(Some("Art"))));
+
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
   let header = create_header_bar(
     Rc::clone(&settings),
@@ -358,7 +396,7 @@ fn app_main(application: &Application) {
   );
 
   main_ui.append(&header);
-  main_ui.append(&main_pane);
+  main_ui.append(&notebook);
 
   let pc_for_keys = Rc::clone(&playback_controller);
   let key_controller = EventControllerKey::new();
