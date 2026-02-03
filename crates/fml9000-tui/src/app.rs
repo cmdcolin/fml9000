@@ -1,8 +1,10 @@
 use fml9000_core::{
     AudioPlayer, Track, YouTubeVideo, Playlist, QueueItem,
-    load_tracks, get_user_playlists, get_queue_items,
+    load_tracks, get_user_playlists, get_queue_items, get_playlist_items,
     load_recently_played_items, load_recently_added_items, queue_len, pop_queue_front,
     add_track_to_queue, add_track_to_recently_played, update_track_play_stats,
+    update_video_play_stats, create_playlist, add_track_to_playlist, delete_playlist,
+    rename_playlist,
 };
 use fml9000_core::settings::{CoreSettings, RepeatMode};
 use ratatui::widgets::TableState;
@@ -10,6 +12,10 @@ use rodio::source::Source;
 use rodio::Decoder;
 use std::fs::File;
 use std::io::BufReader;
+use std::io::Write;
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
@@ -29,6 +35,30 @@ pub enum NavSection {
     RecentlyAdded,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub enum UiMode {
+    Normal,
+    ContextMenu,
+    PlaylistSelect,
+    NewPlaylistInput,
+    PlaylistContextMenu,
+    RenamePlaylistInput,
+    Help,
+}
+
+pub struct ContextMenu {
+    pub track_idx: usize,
+    pub selected: usize,
+    pub items: Vec<&'static str>,
+}
+
+pub struct PlaylistMenu {
+    pub playlist_id: i32,
+    pub playlist_name: String,
+    pub selected: usize,
+    pub items: Vec<&'static str>,
+}
+
 pub struct App {
     pub audio: AudioPlayer,
     pub audio_error: Option<String>,
@@ -41,6 +71,10 @@ pub struct App {
     pub current_nav: NavSection,
     pub current_playlist_id: Option<i32>,
     pub now_playing: Option<NowPlaying>,
+    pub now_playing_video: Option<NowPlayingVideo>,
+    pub mpv_process: Option<Child>,
+    pub mpv_socket_path: Option<PathBuf>,
+    pub mpv_paused: bool,
     pub shuffle_enabled: bool,
     pub repeat_mode: RepeatMode,
     pub settings: CoreSettings,
@@ -51,6 +85,15 @@ pub struct App {
     pub status_message: Option<String>,
     pub scroll_offset: usize,
     pub visible_height: usize,
+    // Context menu state
+    pub ui_mode: UiMode,
+    pub context_menu: Option<ContextMenu>,
+    pub playlist_select_idx: usize,
+    pub new_playlist_name: String,
+    pub playlist_menu: Option<PlaylistMenu>,
+    pub rename_playlist_name: String,
+    // Double-click tracking
+    pub last_click: Option<(Instant, usize)>, // (time, track_idx)
 }
 
 #[derive(Clone)]
@@ -58,6 +101,13 @@ pub struct NowPlaying {
     pub track: Arc<Track>,
     pub duration: Option<Duration>,
     pub started_at: std::time::Instant,
+    pub play_counted: bool,
+}
+
+pub struct NowPlayingVideo {
+    pub video: Arc<YouTubeVideo>,
+    pub started_at: std::time::Instant,
+    pub accumulated_secs: u64,  // Time played before last pause
     pub play_counted: bool,
 }
 
@@ -97,6 +147,28 @@ impl DisplayItem {
         match secs {
             Some(s) => format!("{}:{:02}", s / 60, s % 60),
             None => "?:??".to_string(),
+        }
+    }
+
+    pub fn last_played_str(&self) -> String {
+        let dt = match self {
+            DisplayItem::Track(t) => t.last_played,
+            DisplayItem::Video(v) => v.last_played,
+        };
+        match dt {
+            Some(d) => d.format("%Y-%m-%d").to_string(),
+            None => "-".to_string(),
+        }
+    }
+
+    pub fn added_str(&self) -> String {
+        let dt = match self {
+            DisplayItem::Track(t) => t.added,
+            DisplayItem::Video(v) => v.added,
+        };
+        match dt {
+            Some(d) => d.format("%Y-%m-%d").to_string(),
+            None => "-".to_string(),
         }
     }
 }
@@ -146,6 +218,10 @@ impl App {
             current_nav: NavSection::AllTracks,
             current_playlist_id: None,
             now_playing: None,
+            now_playing_video: None,
+            mpv_process: None,
+            mpv_socket_path: None,
+            mpv_paused: false,
             shuffle_enabled: settings.shuffle_enabled,
             repeat_mode: settings.repeat_mode,
             settings,
@@ -156,6 +232,13 @@ impl App {
             status_message: None,
             scroll_offset: 0,
             visible_height: 20,
+            ui_mode: UiMode::Normal,
+            context_menu: None,
+            playlist_select_idx: 0,
+            new_playlist_name: String::new(),
+            playlist_menu: None,
+            rename_playlist_name: String::new(),
+            last_click: None,
         }
     }
 
@@ -181,28 +264,78 @@ impl App {
                 self.play_next();
             }
         }
+
+        // Update YouTube play count at 50% threshold
+        let youtube_elapsed = self.get_youtube_elapsed_secs();
+        if let Some(ref mut npv) = self.now_playing_video {
+            if !npv.play_counted && !self.mpv_paused {
+                if let Some(dur) = npv.video.duration_seconds {
+                    let half_duration = (dur as u64) / 2;
+                    if youtube_elapsed >= half_duration {
+                        update_video_play_stats(npv.video.id);
+                        npv.play_counted = true;
+                    }
+                }
+            }
+        }
+
+        // Check if mpv process finished (YouTube playback)
+        let mpv_finished = if let Some(ref mut process) = self.mpv_process {
+            match process.try_wait() {
+                Ok(Some(_status)) => true,
+                Ok(None) => false,
+                Err(e) => {
+                    self.status_message = Some(format!("mpv error: {}", e));
+                    true
+                }
+            }
+        } else {
+            false
+        };
+
+        if mpv_finished {
+            self.cleanup_mpv();
+            self.play_next();
+        }
     }
 
-    pub fn nav_items(&self) -> Vec<&str> {
-        vec!["All Tracks", "Playlists", "Queue", "Recently Played", "Recently Added"]
+    const FIXED_NAV_ITEMS: [&'static str; 4] = ["All Tracks", "Queue", "Recently Played", "Recently Added"];
+
+    pub fn nav_item_count(&self) -> usize {
+        Self::FIXED_NAV_ITEMS.len() + self.playlists.len()
+    }
+
+    pub fn nav_item_name(&self, idx: usize) -> String {
+        if idx < Self::FIXED_NAV_ITEMS.len() {
+            Self::FIXED_NAV_ITEMS[idx].to_string()
+        } else {
+            let playlist_idx = idx - Self::FIXED_NAV_ITEMS.len();
+            self.playlists.get(playlist_idx)
+                .map(|p| format!("♫ {}", p.name))
+                .unwrap_or_else(|| "Unknown".to_string())
+        }
     }
 
     pub fn nav_down(&mut self) {
-        let len = self.nav_items().len();
+        let len = self.nav_item_count();
         if len == 0 {
             return;
         }
         let i = self.nav_state.selected().unwrap_or(0);
-        self.nav_state.select(Some((i + 1) % len));
+        if i + 1 < len {
+            self.nav_state.select(Some(i + 1));
+        }
     }
 
     pub fn nav_up(&mut self) {
-        let len = self.nav_items().len();
+        let len = self.nav_item_count();
         if len == 0 {
             return;
         }
         let i = self.nav_state.selected().unwrap_or(0);
-        self.nav_state.select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        if i > 0 {
+            self.nav_state.select(Some(i - 1));
+        }
     }
 
     pub fn track_down(&mut self) {
@@ -215,7 +348,9 @@ impl App {
             return;
         }
         let i = self.track_state.selected().unwrap_or(0);
-        self.track_state.select(Some((i + 1) % len));
+        if i + 1 < len {
+            self.track_state.select(Some(i + 1));
+        }
     }
 
     pub fn track_up(&mut self) {
@@ -228,20 +363,32 @@ impl App {
             return;
         }
         let i = self.track_state.selected().unwrap_or(0);
-        self.track_state.select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        if i > 0 {
+            self.track_state.select(Some(i - 1));
+        }
     }
 
     pub fn select_nav(&mut self) {
         let selected = self.nav_state.selected().unwrap_or(0);
-        match selected {
-            0 => self.load_all_tracks(),
-            1 => self.load_playlists_view(),
-            2 => self.load_queue(),
-            3 => self.load_recently_played(),
-            4 => self.load_recently_added(),
-            _ => {}
+        let fixed_count = Self::FIXED_NAV_ITEMS.len();
+
+        if selected < fixed_count {
+            match selected {
+                0 => self.load_all_tracks(),
+                1 => self.load_queue(),
+                2 => self.load_recently_played(),
+                3 => self.load_recently_added(),
+                _ => {}
+            }
+        } else {
+            // It's a playlist
+            let playlist_idx = selected - fixed_count;
+            if let Some(playlist) = self.playlists.get(playlist_idx) {
+                self.load_playlist(playlist.id);
+            }
         }
         self.track_state.select(if self.displayed_items.is_empty() { None } else { Some(0) });
+        self.scroll_offset = 0;
     }
 
     fn load_all_tracks(&mut self) {
@@ -252,12 +399,23 @@ impl App {
             .collect();
     }
 
-    fn load_playlists_view(&mut self) {
+    fn load_playlist(&mut self, playlist_id: i32) {
         self.current_nav = NavSection::Playlists;
-        // For now, show all tracks. Could expand to show playlist list
-        self.displayed_items = self.tracks.iter()
-            .map(|t| DisplayItem::Track(t.clone()))
-            .collect();
+        self.current_playlist_id = Some(playlist_id);
+        match get_playlist_items(playlist_id) {
+            Ok(items) => {
+                self.displayed_items = items.into_iter().map(|item| {
+                    match item {
+                        QueueItem::Track(t) => DisplayItem::Track(t),
+                        QueueItem::Video(v) => DisplayItem::Video(v),
+                    }
+                }).collect();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to load playlist: {}", e));
+                self.displayed_items.clear();
+            }
+        }
     }
 
     fn load_queue(&mut self) {
@@ -310,8 +468,8 @@ impl App {
                     DisplayItem::Track(track) => {
                         self.play_track(track.clone());
                     }
-                    DisplayItem::Video(_) => {
-                        self.status_message = Some("YouTube playback not supported in TUI".to_string());
+                    DisplayItem::Video(video) => {
+                        self.play_youtube(video.clone());
                     }
                 }
             }
@@ -351,7 +509,87 @@ impl App {
         self.status_message = None;
     }
 
+    fn play_youtube(&mut self, video: Arc<YouTubeVideo>) {
+        // Stop any currently playing content
+        self.audio.stop();
+        self.now_playing = None;
+        self.cleanup_mpv();
+
+        let url = format!("https://www.youtube.com/watch?v={}", video.video_id);
+
+        // Create a unique socket path for IPC
+        let socket_path = PathBuf::from(format!("/tmp/fml9000-mpv-{}.sock", std::process::id()));
+
+        // Spawn mpv in audio-only mode with IPC socket for control
+        match Command::new("mpv")
+            .arg("--no-video")
+            .arg("--really-quiet")
+            .arg(format!("--input-ipc-server={}", socket_path.display()))
+            .arg(&url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.mpv_process = Some(child);
+                self.mpv_socket_path = Some(socket_path);
+                self.mpv_paused = false;
+                self.now_playing_video = Some(NowPlayingVideo {
+                    video,
+                    started_at: std::time::Instant::now(),
+                    accumulated_secs: 0,
+                    play_counted: false,
+                });
+                self.status_message = None;
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to start mpv: {}. Is mpv installed?", e));
+            }
+        }
+    }
+
+    fn cleanup_mpv(&mut self) {
+        if let Some(mut process) = self.mpv_process.take() {
+            let _ = process.kill();
+        }
+        if let Some(ref path) = self.mpv_socket_path.take() {
+            let _ = std::fs::remove_file(path);
+        }
+        self.mpv_paused = false;
+        self.now_playing_video = None;
+    }
+
+    fn send_mpv_command(&self, command: &str) -> bool {
+        if let Some(ref socket_path) = self.mpv_socket_path {
+            if let Ok(mut stream) = UnixStream::connect(socket_path) {
+                let cmd = format!("{{ \"command\": {} }}\n", command);
+                return stream.write_all(cmd.as_bytes()).is_ok();
+            }
+        }
+        false
+    }
+
     pub fn toggle_pause(&mut self) {
+        // Handle mpv (YouTube) playback
+        if self.mpv_process.is_some() {
+            if self.send_mpv_command("[\"cycle\", \"pause\"]") {
+                self.mpv_paused = !self.mpv_paused;
+                // Track time for progress bar
+                if let Some(ref mut npv) = self.now_playing_video {
+                    if self.mpv_paused {
+                        // Pausing: save accumulated time
+                        npv.accumulated_secs += npv.started_at.elapsed().as_secs();
+                    } else {
+                        // Resuming: reset timer
+                        npv.started_at = std::time::Instant::now();
+                    }
+                }
+            }
+            return;
+        }
+
+        // Handle rodio (local file) playback
         if self.audio.is_playing() {
             self.audio.pause();
         } else {
@@ -359,9 +597,22 @@ impl App {
         }
     }
 
+    pub fn get_youtube_elapsed_secs(&self) -> u64 {
+        if let Some(ref npv) = self.now_playing_video {
+            if self.mpv_paused {
+                npv.accumulated_secs
+            } else {
+                npv.accumulated_secs + npv.started_at.elapsed().as_secs()
+            }
+        } else {
+            0
+        }
+    }
+
     pub fn stop(&mut self) {
         self.audio.stop();
         self.now_playing = None;
+        self.cleanup_mpv();
     }
 
     pub fn play_next(&mut self) {
@@ -373,8 +624,9 @@ impl App {
                         self.play_track(track);
                         return;
                     }
-                    QueueItem::Video(_) => {
-                        self.status_message = Some("YouTube not supported in TUI".to_string());
+                    QueueItem::Video(video) => {
+                        self.play_youtube(video);
+                        return;
                     }
                 }
             }
@@ -596,5 +848,283 @@ impl App {
         } else if selected >= self.scroll_offset + self.visible_height {
             self.scroll_offset = selected.saturating_sub(self.visible_height - 1);
         }
+    }
+
+    // Context menu methods
+    pub fn open_context_menu(&mut self, track_idx: usize) {
+        self.context_menu = Some(ContextMenu {
+            track_idx,
+            selected: 0,
+            items: vec!["Add to queue", "Add to playlist", "Create new playlist"],
+        });
+        self.ui_mode = UiMode::ContextMenu;
+    }
+
+    pub fn close_context_menu(&mut self) {
+        self.context_menu = None;
+        self.ui_mode = UiMode::Normal;
+        self.playlist_select_idx = 0;
+        self.new_playlist_name.clear();
+    }
+
+    pub fn context_menu_up(&mut self) {
+        if let Some(ref mut menu) = self.context_menu {
+            if menu.selected > 0 {
+                menu.selected -= 1;
+            }
+        }
+    }
+
+    pub fn context_menu_down(&mut self) {
+        if let Some(ref mut menu) = self.context_menu {
+            if menu.selected + 1 < menu.items.len() {
+                menu.selected += 1;
+            }
+        }
+    }
+
+    pub fn context_menu_select(&mut self) {
+        let (track_idx, selected) = if let Some(ref menu) = self.context_menu {
+            (menu.track_idx, menu.selected)
+        } else {
+            return;
+        };
+
+        match selected {
+            0 => {
+                // Add to queue
+                if let Some(DisplayItem::Track(track)) = self.displayed_items.get(track_idx) {
+                    add_track_to_queue(&track.filename);
+                    self.status_message = Some(format!("Added to queue: {}", track.title.as_deref().unwrap_or("Unknown")));
+                }
+                self.close_context_menu();
+            }
+            1 => {
+                // Add to playlist - show playlist selector
+                self.playlists = get_user_playlists().unwrap_or_default();
+                self.playlist_select_idx = 0;
+                self.ui_mode = UiMode::PlaylistSelect;
+            }
+            2 => {
+                // Create new playlist
+                self.new_playlist_name.clear();
+                self.ui_mode = UiMode::NewPlaylistInput;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn playlist_select_up(&mut self) {
+        if self.playlist_select_idx > 0 {
+            self.playlist_select_idx -= 1;
+        }
+    }
+
+    pub fn playlist_select_down(&mut self) {
+        if self.playlist_select_idx + 1 < self.playlists.len() {
+            self.playlist_select_idx += 1;
+        }
+    }
+
+    pub fn playlist_select_confirm(&mut self) {
+        let track_idx = if let Some(ref menu) = self.context_menu {
+            menu.track_idx
+        } else {
+            self.close_context_menu();
+            return;
+        };
+
+        if let Some(playlist) = self.playlists.get(self.playlist_select_idx) {
+            if let Some(DisplayItem::Track(track)) = self.displayed_items.get(track_idx) {
+                match add_track_to_playlist(playlist.id, &track.filename) {
+                    Ok(()) => {
+                        self.status_message = Some(format!(
+                            "Added '{}' to '{}'",
+                            track.title.as_deref().unwrap_or("Unknown"),
+                            playlist.name
+                        ));
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Error: {}", e));
+                    }
+                }
+            }
+        }
+        self.close_context_menu();
+    }
+
+    pub fn new_playlist_input(&mut self, c: char) {
+        self.new_playlist_name.push(c);
+    }
+
+    pub fn new_playlist_backspace(&mut self) {
+        self.new_playlist_name.pop();
+    }
+
+    pub fn new_playlist_confirm(&mut self) {
+        if self.new_playlist_name.is_empty() {
+            self.status_message = Some("Playlist name cannot be empty".to_string());
+            return;
+        }
+
+        let track_idx = if let Some(ref menu) = self.context_menu {
+            menu.track_idx
+        } else {
+            self.close_context_menu();
+            return;
+        };
+
+        match create_playlist(&self.new_playlist_name) {
+            Ok(playlist_id) => {
+                if let Some(DisplayItem::Track(track)) = self.displayed_items.get(track_idx) {
+                    match add_track_to_playlist(playlist_id, &track.filename) {
+                        Ok(()) => {
+                            self.status_message = Some(format!(
+                                "Created '{}' and added track",
+                                self.new_playlist_name
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Created playlist but failed to add track: {}", e));
+                        }
+                    }
+                }
+                // Refresh playlists
+                self.playlists = get_user_playlists().unwrap_or_default();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to create playlist: {}", e));
+            }
+        }
+        self.close_context_menu();
+    }
+
+    pub fn get_selected_track_idx(&self) -> Option<usize> {
+        if self.is_searching && !self.filtered_indices.is_empty() {
+            self.track_state.selected()
+                .and_then(|i| self.filtered_indices.get(i).copied())
+        } else {
+            self.track_state.selected()
+        }
+    }
+
+    // Playlist context menu methods
+    pub fn open_playlist_menu(&mut self, playlist_id: i32, playlist_name: String) {
+        self.playlist_menu = Some(PlaylistMenu {
+            playlist_id,
+            playlist_name: playlist_name.clone(),
+            selected: 0,
+            items: vec!["Rename playlist", "Delete playlist"],
+        });
+        self.rename_playlist_name = playlist_name;
+        self.ui_mode = UiMode::PlaylistContextMenu;
+    }
+
+    pub fn close_playlist_menu(&mut self) {
+        self.playlist_menu = None;
+        self.ui_mode = UiMode::Normal;
+        self.rename_playlist_name.clear();
+    }
+
+    pub fn playlist_menu_up(&mut self) {
+        if let Some(ref mut menu) = self.playlist_menu {
+            if menu.selected > 0 {
+                menu.selected -= 1;
+            }
+        }
+    }
+
+    pub fn playlist_menu_down(&mut self) {
+        if let Some(ref mut menu) = self.playlist_menu {
+            if menu.selected + 1 < menu.items.len() {
+                menu.selected += 1;
+            }
+        }
+    }
+
+    pub fn playlist_menu_select(&mut self) {
+        let (playlist_id, selected) = if let Some(ref menu) = self.playlist_menu {
+            (menu.playlist_id, menu.selected)
+        } else {
+            return;
+        };
+
+        match selected {
+            0 => {
+                // Rename playlist - show input dialog
+                self.ui_mode = UiMode::RenamePlaylistInput;
+            }
+            1 => {
+                // Delete playlist
+                match delete_playlist(playlist_id) {
+                    Ok(()) => {
+                        self.status_message = Some("Playlist deleted".to_string());
+                        self.playlists = get_user_playlists().unwrap_or_default();
+                        // Reset nav selection if needed
+                        let nav_count = self.nav_item_count();
+                        if let Some(sel) = self.nav_state.selected() {
+                            if sel >= nav_count {
+                                self.nav_state.select(Some(0));
+                                self.load_all_tracks();
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to delete: {}", e));
+                    }
+                }
+                self.close_playlist_menu();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn rename_playlist_input(&mut self, c: char) {
+        self.rename_playlist_name.push(c);
+    }
+
+    pub fn rename_playlist_backspace(&mut self) {
+        self.rename_playlist_name.pop();
+    }
+
+    pub fn rename_playlist_confirm(&mut self) {
+        if self.rename_playlist_name.is_empty() {
+            self.status_message = Some("Name cannot be empty".to_string());
+            return;
+        }
+
+        let playlist_id = if let Some(ref menu) = self.playlist_menu {
+            menu.playlist_id
+        } else {
+            self.close_playlist_menu();
+            return;
+        };
+
+        match rename_playlist(playlist_id, &self.rename_playlist_name) {
+            Ok(()) => {
+                self.status_message = Some(format!("Renamed to '{}'", self.rename_playlist_name));
+                self.playlists = get_user_playlists().unwrap_or_default();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to rename: {}", e));
+            }
+        }
+        self.close_playlist_menu();
+    }
+
+    // Help screen
+    pub fn show_help(&mut self) {
+        self.ui_mode = UiMode::Help;
+    }
+
+    pub fn close_help(&mut self) {
+        self.ui_mode = UiMode::Normal;
+    }
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        // Clean up mpv process and socket when app exits
+        self.cleanup_mpv();
     }
 }
