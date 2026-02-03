@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="GridCell" parent="GtkWidget">
+    <child>
+      <object class="GtkLabel" id="name">
+        <property name="xalign">0</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+      </object>
+    </child>
+  </template>
+</interface>

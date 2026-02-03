@@ -1,24 +1,23 @@
-[package]
-name = "fml9000"
+[workspace]
+resolver = "2"
+members = [
+  "crates/fml9000-core",
+  "crates/fml9000-gtk",
+  "crates/fml9000-tui",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
-[dependencies]
+[workspace.dependencies]
 diesel = { version = "2.1", features = ["sqlite", "chrono", "uuid"] }
 diesel_migrations = { version = "2.1", features = ["sqlite"] }
 directories = "6"
 chrono = "0.4"
-gtk = { version = "0.10", package = "gtk4", features = ["v4_20"] }
-lofty = "0"
-notify = "8"
-regex = "1"
-rodio = "0.21"
 serde_derive = "1"
 serde = "1"
-serde_json = "1"
 toml = "0.9"
-walkdir = "2"
-adw = { version = "0.8", package = "libadwaita" }
-rand = "0.9"
+rodio = "0.21"
 ureq = { version = "3", features = ["json"] }

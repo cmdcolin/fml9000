@@ -1,0 +1,15 @@
+* {
+  font-size: 13px;
+}
+
+.drop-target-hover {
+  background-color: alpha(@accent_color, 0.3);
+}
+
+.user-playlist {
+  font-style: italic;
+}
+
+.repeat-active {
+  color: @accent_color;
+}
