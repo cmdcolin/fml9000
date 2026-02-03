@@ -17,6 +17,7 @@ A music player written in Rust with GTK4-rs
 - Keep track metadata in sqlite database with diesel
 - Four 'quadrant' view
 - Optionally auto-scan one or more folders
+- Also has experimental TUI mode for the terminal, reads some diesal database and plays youtube videos with mpv,
 
 
 
@@ -31,12 +32,13 @@ A music player written in Rust with GTK4-rs
 ```
 git clone https://github.com/cmdcolin/fml9000
 cd fml9000
-cargo run
+cargo run -p fml9000-tui  # terminal mode
+cargo run -p fml9000-gtk  # gui mode
 ```
 
 
 ## Notes
 
-Still a work in progress
+Still a very alpha quality software work in progress
 
 

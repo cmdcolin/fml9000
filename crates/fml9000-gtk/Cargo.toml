@@ -1,0 +1,27 @@
+[package]
+name = "fml9000-gtk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fml9000"
+path = "src/main.rs"
+
+[dependencies]
+fml9000-core = { path = "../fml9000-core" }
+diesel = { workspace = true }
+directories = { workspace = true }
+chrono = { workspace = true }
+serde_derive = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+rodio = { workspace = true }
+ureq = { workspace = true }
+gtk = { version = "0.10", package = "gtk4", features = ["v4_20"] }
+adw = { version = "0.8", package = "libadwaita" }
+lofty = "0"
+notify = "8"
+regex = "1"
+serde_json = "1"
+rand = "0.9"
