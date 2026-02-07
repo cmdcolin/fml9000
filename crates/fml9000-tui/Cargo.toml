@@ -10,8 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 fml9000-core = { path = "../fml9000-core" }
-ratatui = "0.29"
-crossterm = { version = "0.28", features = ["event-stream"] }
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 nucleo = "0.5"
 rodio = { workspace = true }
