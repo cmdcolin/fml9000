@@ -3,8 +3,7 @@ use crate::gtk_helpers::{
   get_album_artist_or_artist, get_cell, get_selection, setup_col, str_or_unknown,
 };
 use crate::settings::FmlSettings;
-use fml9000_core::Track;
-use fml9000_core::Facet;
+use fml9000_core::{Facet, MediaItem, Track};
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use adw::prelude::*;
@@ -22,7 +21,7 @@ where
   I: Iterator<Item = &'a Arc<Track>>,
 {
   for row in vals {
-    store.append(&BoxedAnyObject::new(row.clone()));
+    store.append(&BoxedAnyObject::new(MediaItem::Track(row.clone())));
   }
 }
 

@@ -3,10 +3,8 @@ use crate::settings::RepeatMode;
 use crate::video_widget::VideoWidget;
 use fml9000_core::AudioPlayer;
 use fml9000_core::{
-  add_track_to_recently_played, add_track_to_queue, add_video_to_queue,
-  load_track_by_filename, load_video_by_id, pop_queue_front, queue_len,
-  remove_track_from_queue, remove_video_from_queue, update_track_play_stats,
-  update_video_play_stats, QueueItem,
+  add_to_queue, load_track_by_filename, load_video_by_id, mark_as_played, pop_queue_front,
+  queue_len, remove_from_queue, update_play_stats, MediaItem,
 };
 use fml9000_core::{Track, YouTubeVideo};
 use gtk::gdk;
@@ -39,12 +37,6 @@ pub enum PlaybackSource {
   None,
   Local,
   YouTube,
-}
-
-#[derive(Clone)]
-enum PlayableItem {
-  LocalTrack(Arc<Track>),
-  YouTubeVideo(Arc<YouTubeVideo>),
 }
 
 pub struct PlaybackController {
@@ -110,21 +102,11 @@ impl PlaybackController {
     }
   }
 
-  fn get_item_at(&self, index: u32) -> Option<PlayableItem> {
+  fn get_item_at(&self, index: u32) -> Option<MediaItem> {
     let item = self.playlist_store.item(index)?;
     let obj = item.downcast::<BoxedAnyObject>().ok()?;
-
-    // Try Track first
-    if let Ok(borrowed) = obj.try_borrow::<Arc<Track>>() {
-      return Some(PlayableItem::LocalTrack(borrowed.clone()));
-    }
-
-    // Try YouTubeVideo
-    if let Ok(borrowed) = obj.try_borrow::<Arc<YouTubeVideo>>() {
-      return Some(PlayableItem::YouTubeVideo(borrowed.clone()));
-    }
-
-    None
+    let borrowed: std::cell::Ref<MediaItem> = obj.try_borrow().ok()?;
+    Some(borrowed.clone())
   }
 
   fn show_error(&self, title: &str, message: &str) {
@@ -142,10 +124,10 @@ impl PlaybackController {
       return false;
     };
 
-    let result = match item {
-      PlayableItem::LocalTrack(track) => self.play_track(index, &track),
-      PlayableItem::YouTubeVideo(video) => {
-        self.play_youtube_video(&video, true);
+    let result = match &item {
+      MediaItem::Track(track) => self.play_track(index, track),
+      MediaItem::Video(video) => {
+        self.play_youtube_video(video, true);
         self.current_index.set(Some(index));
         true
       }
@@ -197,7 +179,7 @@ impl PlaybackController {
     self.audio.play_source(source, duration);
     self.current_index.set(Some(index));
     self.playback_source.set(PlaybackSource::Local);
-    add_track_to_recently_played(&filename);
+    mark_as_played(&MediaItem::Track(Arc::new(track.clone())));
     *self.play_stats.borrow_mut() = CurrentPlayStats::Track {
       filename: filename.clone(),
       duration_secs,
@@ -292,7 +274,9 @@ impl PlaybackController {
           if !*counted && *duration_secs > 0.0 && current_pos_secs >= *duration_secs * 0.5 {
             *counted = true;
             let fname = filename.clone();
-            update_track_play_stats(&fname);
+            if let Some(track) = load_track_by_filename(&fname) {
+              update_play_stats(&MediaItem::Track(track));
+            }
             Some((Some(fname), None))
           } else {
             None
@@ -302,7 +286,9 @@ impl PlaybackController {
           if !*counted && *duration_secs > 0.0 && current_pos_secs >= *duration_secs * 0.5 {
             *counted = true;
             let vid_id = *id;
-            update_video_play_stats(vid_id);
+            if let Some(video) = load_video_by_id(vid_id) {
+              update_play_stats(&MediaItem::Video(video));
+            }
             Some((None, Some(vid_id)))
           } else {
             None
@@ -328,10 +314,11 @@ impl PlaybackController {
       for i in 0..n_items {
         if let Some(item) = self.playlist_store.item(i) {
           if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-            if let Ok(track) = obj.try_borrow::<Arc<Track>>() {
-              if track.filename == filename {
+            if let Ok(media_item) = obj.try_borrow::<MediaItem>() {
+              if media_item.track_filename() == Some(filename) {
+                drop(media_item);
                 self.playlist_store.remove(i);
-                self.playlist_store.insert(i, &BoxedAnyObject::new(updated_track));
+                self.playlist_store.insert(i, &BoxedAnyObject::new(MediaItem::Track(updated_track)));
                 return;
               }
             }
@@ -347,10 +334,11 @@ impl PlaybackController {
       for i in 0..n_items {
         if let Some(item) = self.playlist_store.item(i) {
           if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-            if let Ok(video) = obj.try_borrow::<Arc<YouTubeVideo>>() {
-              if video.id == vid_id {
+            if let Ok(media_item) = obj.try_borrow::<MediaItem>() {
+              if media_item.video_db_id() == Some(vid_id) {
+                drop(media_item);
                 self.playlist_store.remove(i);
-                self.playlist_store.insert(i, &BoxedAnyObject::new(updated_video));
+                self.playlist_store.insert(i, &BoxedAnyObject::new(MediaItem::Video(updated_video)));
                 return;
               }
             }
@@ -391,13 +379,8 @@ impl PlaybackController {
     next
   }
 
-  pub fn queue_track(&self, filename: String) {
-    add_track_to_queue(&filename);
-    self.notify_queue_changed();
-  }
-
-  pub fn queue_video(&self, video_id: i32) {
-    add_video_to_queue(video_id);
+  pub fn queue_item(&self, item: &MediaItem) {
+    add_to_queue(item);
     self.notify_queue_changed();
   }
 
@@ -421,44 +404,26 @@ impl PlaybackController {
     }
   }
 
-  pub fn remove_from_queue_by_filename(&self, filename: &str) {
-    remove_track_from_queue(filename);
-    self.notify_queue_changed();
-  }
-
-  pub fn remove_from_queue_by_video_id(&self, video_id: i32) {
-    remove_video_from_queue(video_id);
+  pub fn remove_item_from_queue(&self, item: &MediaItem) {
+    remove_from_queue(item);
     self.notify_queue_changed();
   }
 
   fn play_from_queue(&self) -> bool {
-    if let Some(item) = pop_queue_front() {
+    if let Some(queue_item) = pop_queue_front() {
       self.notify_queue_changed();
-      match item {
-        QueueItem::Track(track) => {
-          let n_items = self.playlist_store.n_items();
-          for i in 0..n_items {
-            if let Some(playlist_item) = self.playlist_store.item(i) {
-              if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
-                if let Ok(t) = obj.try_borrow::<Arc<Track>>() {
-                  if t.filename == track.filename {
-                    return self.play_index(i);
-                  }
-                }
-              }
-            }
-          }
-        }
-        QueueItem::Video(video) => {
-          let n_items = self.playlist_store.n_items();
-          for i in 0..n_items {
-            if let Some(playlist_item) = self.playlist_store.item(i) {
-              if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
-                if let Ok(v) = obj.try_borrow::<Arc<YouTubeVideo>>() {
-                  if v.id == video.id {
-                    return self.play_index(i);
-                  }
-                }
+      let n_items = self.playlist_store.n_items();
+      for i in 0..n_items {
+        if let Some(playlist_item) = self.playlist_store.item(i) {
+          if let Ok(obj) = playlist_item.downcast::<BoxedAnyObject>() {
+            if let Ok(media_item) = obj.try_borrow::<MediaItem>() {
+              let matches = match (&queue_item, &*media_item) {
+                (MediaItem::Track(a), MediaItem::Track(b)) => a.filename == b.filename,
+                (MediaItem::Video(a), MediaItem::Video(b)) => a.id == b.id,
+                _ => false,
+              };
+              if matches {
+                return self.play_index(i);
               }
             }
           }

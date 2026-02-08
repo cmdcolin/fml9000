@@ -1,9 +1,9 @@
 use fml9000_core::{
-    AudioPlayer, Track, YouTubeVideo, Playlist, QueueItem,
+    AudioPlayer, Track, YouTubeVideo, Playlist, MediaItem,
     load_tracks, get_user_playlists, get_queue_items, get_playlist_items,
     load_recently_played_items, load_recently_added_items, queue_len, pop_queue_front,
-    add_track_to_queue, add_track_to_recently_played, update_track_play_stats,
-    update_video_play_stats, create_playlist, add_track_to_playlist, delete_playlist,
+    add_to_queue, mark_as_played, update_play_stats,
+    create_playlist, add_to_playlist, delete_playlist,
     rename_playlist,
 };
 use fml9000_core::settings::{CoreSettings, RepeatMode};
@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info};
+use tracing::info;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
@@ -64,7 +64,7 @@ pub struct App {
     pub audio_error: Option<String>,
     pub tracks: Vec<Arc<Track>>,
     pub playlists: Vec<Arc<Playlist>>,
-    pub displayed_items: Vec<DisplayItem>,
+    pub displayed_items: Vec<MediaItem>,
     pub nav_state: TableState,
     pub track_state: TableState,
     pub active_panel: Panel,
@@ -111,67 +111,6 @@ pub struct NowPlayingVideo {
     pub play_counted: bool,
 }
 
-#[derive(Clone)]
-pub enum DisplayItem {
-    Track(Arc<Track>),
-    Video(Arc<YouTubeVideo>),
-}
-
-impl DisplayItem {
-    pub fn title(&self) -> &str {
-        match self {
-            DisplayItem::Track(t) => t.title.as_deref().unwrap_or("Unknown"),
-            DisplayItem::Video(v) => &v.title,
-        }
-    }
-
-    pub fn artist(&self) -> &str {
-        match self {
-            DisplayItem::Track(t) => t.artist.as_deref().unwrap_or("Unknown"),
-            DisplayItem::Video(_) => "YouTube",
-        }
-    }
-
-    pub fn album(&self) -> &str {
-        match self {
-            DisplayItem::Track(t) => t.album.as_deref().unwrap_or("Unknown"),
-            DisplayItem::Video(_) => "",
-        }
-    }
-
-    pub fn duration_str(&self) -> String {
-        let secs = match self {
-            DisplayItem::Track(t) => t.duration_seconds,
-            DisplayItem::Video(v) => v.duration_seconds,
-        };
-        match secs {
-            Some(s) => format!("{}:{:02}", s / 60, s % 60),
-            None => "?:??".to_string(),
-        }
-    }
-
-    pub fn last_played_str(&self) -> String {
-        let dt = match self {
-            DisplayItem::Track(t) => t.last_played,
-            DisplayItem::Video(v) => v.last_played,
-        };
-        match dt {
-            Some(d) => d.format("%Y-%m-%d").to_string(),
-            None => "-".to_string(),
-        }
-    }
-
-    pub fn added_str(&self) -> String {
-        let dt = match self {
-            DisplayItem::Track(t) => t.added,
-            DisplayItem::Video(v) => v.added,
-        };
-        match dt {
-            Some(d) => d.format("%Y-%m-%d").to_string(),
-            None => "-".to_string(),
-        }
-    }
-}
 
 impl App {
     pub fn new() -> Self {
@@ -192,8 +131,8 @@ impl App {
         let playlists = get_user_playlists().unwrap_or_default();
         info!("Loaded {} playlists in {:?}", playlists.len(), playlists_start.elapsed());
 
-        let displayed_items: Vec<DisplayItem> = tracks.iter()
-            .map(|t| DisplayItem::Track(t.clone()))
+        let displayed_items: Vec<MediaItem> = tracks.iter()
+            .map(|t| MediaItem::Track(t.clone()))
             .collect();
 
         let mut nav_state = TableState::default();
@@ -251,7 +190,7 @@ impl App {
             if !np.play_counted {
                 if let Some(duration) = np.duration {
                     if elapsed >= duration / 2 {
-                        update_track_play_stats(&np.track.filename);
+                        update_play_stats(&MediaItem::Track(np.track.clone()));
                         if let Some(ref mut np) = self.now_playing {
                             np.play_counted = true;
                         }
@@ -272,7 +211,7 @@ impl App {
                 if let Some(dur) = npv.video.duration_seconds {
                     let half_duration = (dur as u64) / 2;
                     if youtube_elapsed >= half_duration {
-                        update_video_play_stats(npv.video.id);
+                        update_play_stats(&MediaItem::Video(npv.video.clone()));
                         npv.play_counted = true;
                     }
                 }
@@ -395,7 +334,7 @@ impl App {
         self.current_nav = NavSection::AllTracks;
         self.current_playlist_id = None;
         self.displayed_items = self.tracks.iter()
-            .map(|t| DisplayItem::Track(t.clone()))
+            .map(|t| MediaItem::Track(t.clone()))
             .collect();
     }
 
@@ -404,12 +343,7 @@ impl App {
         self.current_playlist_id = Some(playlist_id);
         match get_playlist_items(playlist_id) {
             Ok(items) => {
-                self.displayed_items = items.into_iter().map(|item| {
-                    match item {
-                        QueueItem::Track(t) => DisplayItem::Track(t),
-                        QueueItem::Video(v) => DisplayItem::Video(v),
-                    }
-                }).collect();
+                self.displayed_items = items;
             }
             Err(e) => {
                 self.status_message = Some(format!("Failed to load playlist: {}", e));
@@ -421,37 +355,19 @@ impl App {
     fn load_queue(&mut self) {
         self.current_nav = NavSection::Queue;
         self.current_playlist_id = None;
-        let items = get_queue_items();
-        self.displayed_items = items.into_iter().map(|item| {
-            match item {
-                QueueItem::Track(t) => DisplayItem::Track(t),
-                QueueItem::Video(v) => DisplayItem::Video(v),
-            }
-        }).collect();
+        self.displayed_items = get_queue_items();
     }
 
     fn load_recently_played(&mut self) {
         self.current_nav = NavSection::RecentlyPlayed;
         self.current_playlist_id = None;
-        let items = load_recently_played_items(100);
-        self.displayed_items = items.into_iter().map(|item| {
-            match item {
-                QueueItem::Track(t) => DisplayItem::Track(t),
-                QueueItem::Video(v) => DisplayItem::Video(v),
-            }
-        }).collect();
+        self.displayed_items = load_recently_played_items(100);
     }
 
     fn load_recently_added(&mut self) {
         self.current_nav = NavSection::RecentlyAdded;
         self.current_playlist_id = None;
-        let items = load_recently_added_items(100);
-        self.displayed_items = items.into_iter().map(|item| {
-            match item {
-                QueueItem::Track(t) => DisplayItem::Track(t),
-                QueueItem::Video(v) => DisplayItem::Video(v),
-            }
-        }).collect();
+        self.displayed_items = load_recently_added_items(100);
     }
 
     pub fn play_selected(&mut self) {
@@ -463,15 +379,8 @@ impl App {
         };
 
         if let Some(idx) = selected_idx {
-            if let Some(item) = self.displayed_items.get(idx) {
-                match item {
-                    DisplayItem::Track(track) => {
-                        self.play_track(track.clone());
-                    }
-                    DisplayItem::Video(video) => {
-                        self.play_youtube(video.clone());
-                    }
-                }
+            if let Some(item) = self.displayed_items.get(idx).cloned() {
+                self.play_item(&item);
             }
         }
     }
@@ -497,7 +406,7 @@ impl App {
 
         let duration = source.total_duration();
         self.audio.play_source(source, duration);
-        add_track_to_recently_played(filename);
+        mark_as_played(&MediaItem::Track(track.clone()));
 
         self.now_playing = Some(NowPlaying {
             track,
@@ -615,20 +524,33 @@ impl App {
         self.cleanup_mpv();
     }
 
+    fn play_item(&mut self, item: &MediaItem) {
+        match item {
+            MediaItem::Track(track) => self.play_track(track.clone()),
+            MediaItem::Video(video) => self.play_youtube(video.clone()),
+        }
+    }
+
+    fn current_playing_index(&self) -> Option<usize> {
+        if let Some(ref npv) = self.now_playing_video {
+            self.displayed_items.iter().position(|item| {
+                item.youtube_video_id() == Some(&npv.video.video_id)
+            })
+        } else if let Some(ref np) = self.now_playing {
+            self.displayed_items.iter().position(|item| {
+                item.track_filename() == Some(&np.track.filename)
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn play_next(&mut self) {
         // Check queue first
         if queue_len() > 0 {
             if let Some(item) = pop_queue_front() {
-                match item {
-                    QueueItem::Track(track) => {
-                        self.play_track(track);
-                        return;
-                    }
-                    QueueItem::Video(video) => {
-                        self.play_youtube(video);
-                        return;
-                    }
-                }
+                self.play_item(&item);
+                return;
             }
         }
 
@@ -637,67 +559,54 @@ impl App {
                 self.play_track(np.track.clone());
                 return;
             }
+            if let Some(ref npv) = self.now_playing_video {
+                self.play_youtube(npv.video.clone());
+                return;
+            }
         }
 
-        // Find current track index and play next
-        if let Some(ref np) = self.now_playing.clone() {
-            if let Some(current_idx) = self.displayed_items.iter().position(|item| {
-                if let DisplayItem::Track(t) = item {
-                    t.filename == np.track.filename
-                } else {
-                    false
-                }
-            }) {
-                let len = self.displayed_items.len();
-                if len == 0 {
-                    return;
-                }
+        if let Some(current_idx) = self.current_playing_index() {
+            let len = self.displayed_items.len();
+            if len == 0 {
+                return;
+            }
 
-                let next_idx = if self.shuffle_enabled {
-                    use rand::Rng;
-                    let mut rng = rand::rng();
-                    rng.random_range(0..len)
-                } else if current_idx + 1 < len {
-                    current_idx + 1
-                } else if self.repeat_mode == RepeatMode::All {
-                    0
-                } else {
-                    self.now_playing = None;
-                    return;
-                };
+            let next_idx = if self.shuffle_enabled {
+                use rand::Rng;
+                let mut rng = rand::rng();
+                rng.random_range(0..len)
+            } else if current_idx + 1 < len {
+                current_idx + 1
+            } else if self.repeat_mode == RepeatMode::All {
+                0
+            } else {
+                self.now_playing = None;
+                return;
+            };
 
-                if let Some(DisplayItem::Track(track)) = self.displayed_items.get(next_idx) {
-                    self.play_track(track.clone());
-                    self.track_state.select(Some(next_idx));
-                }
+            if let Some(item) = self.displayed_items.get(next_idx).cloned() {
+                self.play_item(&item);
+                self.track_state.select(Some(next_idx));
             }
         }
     }
 
     pub fn play_prev(&mut self) {
-        if let Some(ref np) = self.now_playing.clone() {
-            if let Some(current_idx) = self.displayed_items.iter().position(|item| {
-                if let DisplayItem::Track(t) = item {
-                    t.filename == np.track.filename
-                } else {
-                    false
-                }
-            }) {
-                let len = self.displayed_items.len();
-                if len == 0 {
-                    return;
-                }
+        if let Some(current_idx) = self.current_playing_index() {
+            let len = self.displayed_items.len();
+            if len == 0 {
+                return;
+            }
 
-                let prev_idx = if current_idx > 0 {
-                    current_idx - 1
-                } else {
-                    len - 1
-                };
+            let prev_idx = if current_idx > 0 {
+                current_idx - 1
+            } else {
+                len - 1
+            };
 
-                if let Some(DisplayItem::Track(track)) = self.displayed_items.get(prev_idx) {
-                    self.play_track(track.clone());
-                    self.track_state.select(Some(prev_idx));
-                }
+            if let Some(item) = self.displayed_items.get(prev_idx).cloned() {
+                self.play_item(&item);
+                self.track_state.select(Some(prev_idx));
             }
         }
     }
@@ -711,9 +620,9 @@ impl App {
         };
 
         if let Some(idx) = selected_idx {
-            if let Some(DisplayItem::Track(track)) = self.displayed_items.get(idx) {
-                add_track_to_queue(&track.filename);
-                self.status_message = Some(format!("Added to queue: {}", track.title.as_deref().unwrap_or("Unknown")));
+            if let Some(item) = self.displayed_items.get(idx) {
+                add_to_queue(item);
+                self.status_message = Some(format!("Added to queue: {}", item.title()));
             }
         }
     }
@@ -810,8 +719,8 @@ impl App {
         }
     }
 
-    pub fn get_visible_items(&self) -> (Vec<&DisplayItem>, usize) {
-        let total = self.get_total_items();
+    pub fn get_visible_items(&self) -> (Vec<&MediaItem>, usize) {
+        let _total = self.get_total_items();
         let selected = self.track_state.selected().unwrap_or(0);
 
         // Adjust scroll offset to keep selected item visible
@@ -823,7 +732,7 @@ impl App {
             self.scroll_offset
         };
 
-        let items: Vec<&DisplayItem> = if self.is_searching && !self.filtered_indices.is_empty() {
+        let items: Vec<&MediaItem> = if self.is_searching && !self.filtered_indices.is_empty() {
             self.filtered_indices.iter()
                 .skip(scroll)
                 .take(self.visible_height)
@@ -893,9 +802,9 @@ impl App {
         match selected {
             0 => {
                 // Add to queue
-                if let Some(DisplayItem::Track(track)) = self.displayed_items.get(track_idx) {
-                    add_track_to_queue(&track.filename);
-                    self.status_message = Some(format!("Added to queue: {}", track.title.as_deref().unwrap_or("Unknown")));
+                if let Some(item) = self.displayed_items.get(track_idx) {
+                    add_to_queue(item);
+                    self.status_message = Some(format!("Added to queue: {}", item.title()));
                 }
                 self.close_context_menu();
             }
@@ -935,12 +844,12 @@ impl App {
         };
 
         if let Some(playlist) = self.playlists.get(self.playlist_select_idx) {
-            if let Some(DisplayItem::Track(track)) = self.displayed_items.get(track_idx) {
-                match add_track_to_playlist(playlist.id, &track.filename) {
+            if let Some(item) = self.displayed_items.get(track_idx) {
+                match add_to_playlist(playlist.id, item) {
                     Ok(()) => {
                         self.status_message = Some(format!(
                             "Added '{}' to '{}'",
-                            track.title.as_deref().unwrap_or("Unknown"),
+                            item.title(),
                             playlist.name
                         ));
                     }
@@ -976,8 +885,8 @@ impl App {
 
         match create_playlist(&self.new_playlist_name) {
             Ok(playlist_id) => {
-                if let Some(DisplayItem::Track(track)) = self.displayed_items.get(track_idx) {
-                    match add_track_to_playlist(playlist_id, &track.filename) {
+                if let Some(item) = self.displayed_items.get(track_idx) {
+                    match add_to_playlist(playlist_id, item) {
                         Ok(()) => {
                             self.status_message = Some(format!(
                                 "Created '{}' and added track",

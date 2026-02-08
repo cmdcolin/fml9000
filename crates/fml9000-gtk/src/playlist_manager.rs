@@ -2,15 +2,13 @@ use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, setup_col};
 use crate::new_playlist_dialog;
 use crate::playback_controller::PlaybackController;
-use fml9000_core::QueueItem;
 use crate::settings::FmlSettings;
 use crate::youtube_add_dialog;
 use adw::prelude::*;
-use fml9000_core::YouTubeVideo;
 use fml9000_core::{
-  add_track_to_playlist, add_video_to_playlist, delete_playlist, get_playlist_items,
-  get_queue_items, get_user_playlists, get_videos_for_channel, get_youtube_channels,
-  load_recently_added_items, load_recently_played_items, rename_playlist,
+  add_to_playlist, delete_playlist, get_playlist_items, get_queue_items, get_user_playlists,
+  get_videos_for_channel, get_youtube_channels, load_recently_added_items,
+  load_recently_played_items, rename_playlist, MediaItem,
 };
 use gtk::gdk;
 use gtk::gio::ListStore;
@@ -19,7 +17,6 @@ use gtk::glib::BoxedAnyObject;
 use gtk::{ColumnView, ColumnViewColumn, DropTarget, GestureClick, PopoverMenu, ScrolledWindow, SignalListItemFactory, SingleSelection};
 use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 #[derive(Clone, PartialEq)]
 enum PlaylistType {
@@ -106,7 +103,7 @@ pub fn create_playlist_manager(
                     *current_pid_for_drop.borrow_mut() = Some(playlist_id);
                     main_store_for_drop.remove_all();
                     if let Ok(items) = get_playlist_items(playlist_id) {
-                      load_queue_items(&items, &main_store_for_drop);
+                      load_media_items(&items, &main_store_for_drop);
                     }
                     break;
                   }
@@ -191,7 +188,7 @@ pub fn create_playlist_manager(
         playback_controller_clone.set_on_queue_changed(Some(Rc::new(move || {
           store.remove_all();
           let items = get_queue_items();
-          load_queue_items(&items, &store);
+          load_media_items(&items, &store);
         })));
       } else {
         playback_controller_clone.set_on_queue_changed(None);
@@ -201,28 +198,29 @@ pub fn create_playlist_manager(
         PlaylistType::RecentlyAdded => {
           *current_playlist_id_clone.borrow_mut() = None;
           let items = load_recently_added_items(0);
-          load_queue_items(&items, &main_playlist_store_clone);
+          load_media_items(&items, &main_playlist_store_clone);
         }
         PlaylistType::RecentlyPlayed => {
           *current_playlist_id_clone.borrow_mut() = None;
           let items = load_recently_played_items(100);
-          load_queue_items(&items, &main_playlist_store_clone);
+          load_media_items(&items, &main_playlist_store_clone);
         }
         PlaylistType::PlaybackQueue => {
           *current_playlist_id_clone.borrow_mut() = None;
           let items = get_queue_items();
-          load_queue_items(&items, &main_playlist_store_clone);
+          load_media_items(&items, &main_playlist_store_clone);
         }
         PlaylistType::YouTubeChannel(id, _) => {
           *current_playlist_id_clone.borrow_mut() = None;
           if let Ok(videos) = get_videos_for_channel(*id) {
-            load_youtube_videos(&videos, &main_playlist_store_clone);
+            let items: Vec<MediaItem> = videos.into_iter().map(|v| MediaItem::Video(v)).collect();
+            load_media_items(&items, &main_playlist_store_clone);
           }
         }
         PlaylistType::UserPlaylist(id, _) => {
           *current_playlist_id_clone.borrow_mut() = Some(*id);
           if let Ok(items) = get_playlist_items(*id) {
-            load_queue_items(&items, &main_playlist_store_clone);
+            load_media_items(&items, &main_playlist_store_clone);
           }
         }
       }
@@ -384,37 +382,30 @@ fn populate_playlist_store(store: &ListStore) {
   }
 }
 
-fn load_youtube_videos(videos: &[Arc<YouTubeVideo>], store: &ListStore) {
-  for video in videos {
-    store.append(&BoxedAnyObject::new(video.clone()));
-  }
-}
-
-fn load_queue_items(items: &[QueueItem], store: &ListStore) {
+fn load_media_items(items: &[MediaItem], store: &ListStore) {
   for item in items {
-    match item {
-      QueueItem::Track(track) => {
-        store.append(&BoxedAnyObject::new(track.clone()));
-      }
-      QueueItem::Video(video) => {
-        store.append(&BoxedAnyObject::new(video.clone()));
-      }
-    }
+    store.append(&BoxedAnyObject::new(item.clone()));
   }
 }
 
 fn handle_drop_on_playlist(playlist_id: i32, data: &str) -> bool {
+  use fml9000_core::{load_track_by_filename, load_video_by_id};
+
   let mut success = false;
   for line in data.lines() {
     if let Some(filename) = line.strip_prefix("track:") {
-      if add_track_to_playlist(playlist_id, filename).is_ok() {
-        success = true;
+      if let Some(track) = load_track_by_filename(filename) {
+        if add_to_playlist(playlist_id, &MediaItem::Track(track)).is_ok() {
+          success = true;
+        }
       }
     }
     if let Some(video_id_str) = line.strip_prefix("video:") {
       if let Ok(video_id) = video_id_str.parse::<i32>() {
-        if add_video_to_playlist(playlist_id, video_id).is_ok() {
-          success = true;
+        if let Some(video) = load_video_by_id(video_id) {
+          if add_to_playlist(playlist_id, &MediaItem::Video(video)).is_ok() {
+            success = true;
+          }
         }
       }
     }

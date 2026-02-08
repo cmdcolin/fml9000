@@ -1,4 +1,5 @@
-use crate::app::{App, Panel, DisplayItem, UiMode};
+use crate::app::{App, Panel, UiMode};
+use fml9000_core::MediaItem;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -295,13 +296,13 @@ fn render_track_list(f: &mut Frame, app: &mut App, area: Rect) {
         let actual_idx = scroll_offset + i;
 
         let is_playing = if let Some(ref npv) = app.now_playing_video {
-            if let DisplayItem::Video(video) = item {
+            if let MediaItem::Video(video) = item {
                 video.video_id == npv.video.video_id
             } else {
                 false
             }
         } else if let Some(ref np) = app.now_playing {
-            if let DisplayItem::Track(track) = item {
+            if let MediaItem::Track(track) = item {
                 track.filename == np.track.filename
             } else {
                 false

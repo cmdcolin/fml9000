@@ -2,7 +2,7 @@ use crate::schema::{playback_queue, playlist_tracks, playlists, tracks, youtube_
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
-#[derive(Queryable, Selectable, Clone)]
+#[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = crate::schema::tracks)]
 pub struct Track {
   pub filename: String,
@@ -54,7 +54,7 @@ pub struct NewYouTubeChannel<'a> {
   pub thumbnail_url: Option<&'a str>,
 }
 
-#[derive(Queryable, Selectable, Clone)]
+#[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = crate::schema::youtube_videos)]
 pub struct YouTubeVideo {
   pub id: i32,

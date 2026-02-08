@@ -3,11 +3,9 @@ use crate::gtk_helpers::{get_cell, setup_col, str_or_unknown};
 use crate::video_widget::open_in_browser;
 use crate::playback_controller::{PlaybackController, PlaybackSource};
 use crate::settings::FmlSettings;
-use chrono::NaiveDateTime;
-use fml9000_core::{Track, YouTubeVideo};
 use fml9000_core::{
-  get_playlist_items, reorder_playlist_items, remove_track_from_playlist,
-  remove_video_from_playlist, PlaylistItemIdentifier, QueueItem,
+  get_playlist_items, reorder_playlist_items, remove_from_playlist, MediaItem,
+  PlaylistItemIdentifier,
 };
 use gtk::gdk::{self, Key};
 use gtk::gio::ListStore;
@@ -20,17 +18,9 @@ use gtk::{
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
 
 pub type CurrentPlaylistId = Rc<RefCell<Option<i32>>>;
 pub type IsViewingPlaybackQueue = Rc<Cell<bool>>;
-
-fn format_date(dt: Option<NaiveDateTime>) -> String {
-  match dt {
-    Some(d) => d.format("%Y-%m-%d").to_string(),
-    None => String::new(),
-  }
-}
 
 fn open_folder_in_explorer(file_path: &str) {
   if let Some(parent) = Path::new(file_path).parent() {
@@ -56,23 +46,11 @@ fn open_folder_in_explorer(file_path: &str) {
   }
 }
 
-#[derive(Clone)]
-enum PlaylistItem {
-  Track(Arc<Track>),
-  Video(Arc<YouTubeVideo>),
+fn try_get_item(obj: &BoxedAnyObject) -> Option<MediaItem> {
+  obj.try_borrow::<MediaItem>().ok().map(|item| item.clone())
 }
 
-fn try_get_item(obj: &BoxedAnyObject) -> Option<PlaylistItem> {
-  if let Ok(track) = obj.try_borrow::<Arc<Track>>() {
-    return Some(PlaylistItem::Track(track.clone()));
-  }
-  if let Ok(video) = obj.try_borrow::<Arc<YouTubeVideo>>() {
-    return Some(PlaylistItem::Video(video.clone()));
-  }
-  None
-}
-
-fn create_sorter(extract: impl Fn(&PlaylistItem) -> String + 'static) -> CustomSorter {
+fn create_sorter(extract: impl Fn(&MediaItem) -> String + 'static) -> CustomSorter {
   CustomSorter::new(move |obj1, obj2| {
     let val1 = obj1
       .downcast_ref::<BoxedAnyObject>()
@@ -90,7 +68,7 @@ fn create_sorter(extract: impl Fn(&PlaylistItem) -> String + 'static) -> CustomS
 
 fn create_column(
   settings: Rc<RefCell<FmlSettings>>,
-  cb: impl Fn(&PlaylistItem) -> String + 'static,
+  cb: impl Fn(&MediaItem) -> String + 'static,
 ) -> SignalListItemFactory {
   let factory = SignalListItemFactory::new();
   factory.connect_setup(move |_factory, item| {
@@ -101,9 +79,9 @@ fn create_column(
     let (cell, obj) = get_cell(item);
     let row_height = settings_for_bind.borrow().row_height;
     cell.set_row_height(row_height.height_pixels(), row_height.is_compact());
-    if let Some(playlist_item) = try_get_item(&obj) {
+    if let Some(media_item) = try_get_item(&obj) {
       cell.set_entry(&Entry {
-        name: cb(&playlist_item),
+        name: cb(&media_item),
       });
     }
   });
@@ -126,12 +104,12 @@ pub fn create_playlist_view(
   is_viewing_playback_queue: IsViewingPlaybackQueue,
 ) -> ScrolledWindow {
   let artistalbum_sorter = create_sorter(|item| match item {
-    PlaylistItem::Track(r) => format!(
+    MediaItem::Track(r) => format!(
       "{} // {}",
       str_or_unknown(&r.album),
       str_or_unknown(&r.artist),
     ),
-    PlaylistItem::Video(v) => {
+    MediaItem::Video(v) => {
       let (artist, album) = parse_youtube_title(&v.title);
       format!("{} // {}", album, artist)
     }
@@ -142,9 +120,9 @@ pub fn create_playlist_view(
       obj
         .downcast_ref::<BoxedAnyObject>()
         .and_then(|o| try_get_item(o))
-        .map(|item| match item {
-          PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
-          PlaylistItem::Video(_) => String::new(),
+        .map(|item| match &item {
+          MediaItem::Track(r) => r.track.clone().unwrap_or_default(),
+          MediaItem::Video(_) => String::new(),
         })
         .unwrap_or_default()
     };
@@ -157,14 +135,11 @@ pub fn create_playlist_view(
     }
   });
 
-  let title_sorter = create_sorter(|item| match item {
-    PlaylistItem::Track(r) => r.title.clone().unwrap_or_default(),
-    PlaylistItem::Video(v) => v.title.clone(),
-  });
+  let title_sorter = create_sorter(|item| item.title().to_string());
 
   let filename_sorter = create_sorter(|item| match item {
-    PlaylistItem::Track(r) => r.filename.clone(),
-    PlaylistItem::Video(v) => v.video_id.clone(),
+    MediaItem::Track(r) => r.filename.clone(),
+    MediaItem::Video(v) => v.video_id.clone(),
   });
 
   let sort_model = SortListModel::new(Some(playlist_store.clone()), None::<gtk::Sorter>);
@@ -174,88 +149,55 @@ pub fn create_playlist_view(
     .build();
 
   let artistalbum = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => {
+    MediaItem::Track(r) => {
       format!(
         "{} // {}",
         str_or_unknown(&r.album),
         str_or_unknown(&r.artist),
       )
     }
-    PlaylistItem::Video(v) => {
+    MediaItem::Video(v) => {
       let (artist, album) = parse_youtube_title(&v.title);
       format!("{} // {}", album, artist)
     }
   });
 
   let track_num = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => r.track.clone().unwrap_or_default(),
-    PlaylistItem::Video(_) => String::new(),
+    MediaItem::Track(r) => r.track.clone().unwrap_or_default(),
+    MediaItem::Video(_) => String::new(),
   });
 
-  let duration = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => format_duration(r.duration_seconds),
-    PlaylistItem::Video(v) => format_duration(v.duration_seconds),
-  });
+  let duration = create_column(Rc::clone(&settings), |_item| _item.duration_str());
 
   let duration_sorter = CustomSorter::new(move |obj1, obj2| {
     let get_duration = |obj: &gtk::glib::Object| -> i32 {
       obj
         .downcast_ref::<BoxedAnyObject>()
         .and_then(|o| try_get_item(o))
-        .map(|item| match item {
-          PlaylistItem::Track(r) => r.duration_seconds.unwrap_or(0),
-          PlaylistItem::Video(v) => v.duration_seconds.unwrap_or(0),
-        })
+        .map(|item| item.duration_seconds().unwrap_or(0))
         .unwrap_or(0)
     };
     get_duration(obj1).cmp(&get_duration(obj2)).into()
   });
 
-  let title = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => r.title.clone().unwrap_or_default(),
-    PlaylistItem::Video(v) => v.title.clone(),
-  });
+  let title = create_column(Rc::clone(&settings), |item| item.title().to_string());
 
   let filename = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => r.filename.clone(),
-    PlaylistItem::Video(v) => v.video_id.clone(),
+    MediaItem::Track(r) => r.filename.clone(),
+    MediaItem::Video(v) => v.video_id.clone(),
   });
 
-  let date_added = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => format_date(r.added),
-    PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
-  });
+  let date_added = create_column(Rc::clone(&settings), |item| item.added_str());
 
-  let date_sorter = create_sorter(|item| match item {
-    PlaylistItem::Track(r) => format_date(r.added),
-    PlaylistItem::Video(v) => format_date(Some(v.fetched_at)),
-  });
+  let date_sorter = create_sorter(|item| item.added_str());
 
-  let last_played = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => format_date(r.last_played),
-    PlaylistItem::Video(v) => format_date(v.last_played),
-  });
+  let last_played = create_column(Rc::clone(&settings), |item| item.last_played_str());
 
-  let last_played_sorter = create_sorter(|item| match item {
-    PlaylistItem::Track(r) => format_date(r.last_played),
-    PlaylistItem::Video(v) => format_date(v.last_played),
-  });
+  let last_played_sorter = create_sorter(|item| item.last_played_str());
 
-  let play_count = create_column(Rc::clone(&settings), |item| match item {
-    PlaylistItem::Track(r) => {
-      if r.play_count > 0 {
-        r.play_count.to_string()
-      } else {
-        String::new()
-      }
-    }
-    PlaylistItem::Video(v) => {
-      if v.play_count > 0 {
-        v.play_count.to_string()
-      } else {
-        String::new()
-      }
-    }
+  let play_count = create_column(Rc::clone(&settings), |item| {
+    let count = item.play_count();
+    if count > 0 { count.to_string() } else { String::new() }
   });
 
   let play_count_sorter = CustomSorter::new(move |obj1, obj2| {
@@ -263,10 +205,7 @@ pub fn create_playlist_view(
       obj
         .downcast_ref::<BoxedAnyObject>()
         .and_then(|o| try_get_item(o))
-        .map(|item| match item {
-          PlaylistItem::Track(r) => r.play_count,
-          PlaylistItem::Video(v) => v.play_count,
-        })
+        .map(|item| item.play_count())
         .unwrap_or(0)
     };
     get_count(obj1).cmp(&get_count(obj2)).into()
@@ -373,8 +312,8 @@ pub fn create_playlist_view(
           if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
             if let Some(playlist_item) = try_get_item(&obj) {
               items.push(match playlist_item {
-                PlaylistItem::Track(track) => format!("track:{}", track.filename),
-                PlaylistItem::Video(video) => format!("video:{}", video.id),
+                MediaItem::Track(track) => format!("track:{}", track.filename),
+                MediaItem::Video(video) => format!("video:{}", video.id),
               });
             }
           }
@@ -421,7 +360,7 @@ pub fn create_playlist_view(
         for i in 0..n_items {
           if let Some(item) = store_for_drop.item(i) {
             if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-              if let Some(PlaylistItem::Track(t)) = try_get_item(&obj) {
+              if let Some(MediaItem::Track(t)) = try_get_item(&obj) {
                 if t.filename == filename {
                   dragged_indices.push(i);
                   break;
@@ -436,7 +375,7 @@ pub fn create_playlist_view(
           for i in 0..n_items {
             if let Some(item) = store_for_drop.item(i) {
               if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-                if let Some(PlaylistItem::Video(v)) = try_get_item(&obj) {
+                if let Some(MediaItem::Video(v)) = try_get_item(&obj) {
                   if v.id == vid_id {
                     dragged_indices.push(i);
                     break;
@@ -461,8 +400,8 @@ pub fn create_playlist_view(
           if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
             if let Some(playlist_item) = try_get_item(&obj) {
               match playlist_item {
-                PlaylistItem::Track(t) => identifiers.push(PlaylistItemIdentifier::Track(t.filename.clone())),
-                PlaylistItem::Video(v) => identifiers.push(PlaylistItemIdentifier::Video(v.id)),
+                MediaItem::Track(t) => identifiers.push(PlaylistItemIdentifier::Track(t.filename.clone())),
+                MediaItem::Video(v) => identifiers.push(PlaylistItemIdentifier::Video(v.id)),
               }
             }
           }
@@ -488,8 +427,8 @@ pub fn create_playlist_view(
         if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
           if let Some(playlist_item) = try_get_item(&obj) {
             match playlist_item {
-              PlaylistItem::Track(t) => dragged_items.push(PlaylistItemIdentifier::Track(t.filename.clone())),
-              PlaylistItem::Video(v) => dragged_items.push(PlaylistItemIdentifier::Video(v.id)),
+              MediaItem::Track(t) => dragged_items.push(PlaylistItemIdentifier::Track(t.filename.clone())),
+              MediaItem::Video(v) => dragged_items.push(PlaylistItemIdentifier::Video(v.id)),
             }
           }
         }
@@ -504,14 +443,7 @@ pub fn create_playlist_view(
       store_for_drop.remove_all();
       if let Ok(items) = get_playlist_items(playlist_id) {
         for item in items {
-          match item {
-            QueueItem::Track(track) => {
-              store_for_drop.append(&BoxedAnyObject::new(track));
-            }
-            QueueItem::Video(video) => {
-              store_for_drop.append(&BoxedAnyObject::new(video));
-            }
-          }
+          store_for_drop.append(&BoxedAnyObject::new(item));
         }
       }
     }
@@ -575,10 +507,10 @@ pub fn create_playlist_view(
       if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
         if let Some(playlist_item) = try_get_item(&obj) {
           match playlist_item {
-            PlaylistItem::Track(_) => {
+            MediaItem::Track(_) => {
               pc_for_activate.play_index(pos);
             }
-            PlaylistItem::Video(video) => {
+            MediaItem::Video(video) => {
               let audio_only = settings_for_activate.borrow().youtube_audio_only;
               pc_for_activate.play_youtube_video(&video, audio_only);
             }
@@ -610,82 +542,82 @@ pub fn create_playlist_view(
   track_popover.set_parent(&playlist_columnview);
   track_popover.set_has_arrow(false);
 
-  let current_video: Rc<RefCell<Option<Arc<YouTubeVideo>>>> = Rc::new(RefCell::new(None));
-  let current_track: Rc<RefCell<Option<Arc<Track>>>> = Rc::new(RefCell::new(None));
+  let current_item: Rc<RefCell<Option<MediaItem>>> = Rc::new(RefCell::new(None));
 
   let action_group = gtk::gio::SimpleActionGroup::new();
 
-  let cv = current_video.clone();
+  let ci = current_item.clone();
   let pc = playback_controller.clone();
   let play_audio = gtk::gio::SimpleAction::new("play-audio", None);
   play_audio.connect_activate(move |_, _| {
-    if let Some(video) = cv.borrow().as_ref() {
+    if let Some(MediaItem::Video(video)) = ci.borrow().as_ref() {
       pc.play_youtube_video(video, true);
     }
   });
   action_group.add_action(&play_audio);
 
-  let cv = current_video.clone();
+  let ci = current_item.clone();
   let pc = playback_controller.clone();
   let play_video = gtk::gio::SimpleAction::new("play-video", None);
   play_video.connect_activate(move |_, _| {
-    if let Some(video) = cv.borrow().as_ref() {
+    if let Some(MediaItem::Video(video)) = ci.borrow().as_ref() {
       pc.play_youtube_video(video, false);
     }
   });
   action_group.add_action(&play_video);
 
-  let cv = current_video.clone();
+  let ci = current_item.clone();
   let open_browser = gtk::gio::SimpleAction::new("open-browser", None);
   open_browser.connect_activate(move |_, _| {
-    if let Some(video) = cv.borrow().as_ref() {
-      open_in_browser(&video.video_id);
+    if let Some(vid_id) = ci.borrow().as_ref().and_then(|i| i.youtube_video_id()) {
+      open_in_browser(vid_id);
     }
   });
   action_group.add_action(&open_browser);
 
-  let ct = current_track.clone();
+  let ci = current_item.clone();
   let open_folder = gtk::gio::SimpleAction::new("open-folder", None);
   open_folder.connect_activate(move |_, _| {
-    if let Some(track) = ct.borrow().as_ref() {
-      open_folder_in_explorer(&track.filename);
+    if let Some(filename) = ci.borrow().as_ref().and_then(|i| i.track_filename()) {
+      open_folder_in_explorer(filename);
     }
   });
   action_group.add_action(&open_folder);
 
-  let ct = current_track.clone();
+  let ci = current_item.clone();
   let pc = playback_controller.clone();
   let queue_track = gtk::gio::SimpleAction::new("queue-track", None);
   queue_track.connect_activate(move |_, _| {
-    if let Some(track) = ct.borrow().as_ref() {
-      pc.queue_track(track.filename.clone());
+    if let Some(item) = ci.borrow().as_ref() {
+      pc.queue_item(item);
     }
   });
   action_group.add_action(&queue_track);
 
-  let cv = current_video.clone();
+  let ci = current_item.clone();
   let pc = playback_controller.clone();
   let queue_video = gtk::gio::SimpleAction::new("queue-video", None);
   queue_video.connect_activate(move |_, _| {
-    if let Some(video) = cv.borrow().as_ref() {
-      pc.queue_video(video.id);
+    if let Some(item) = ci.borrow().as_ref() {
+      pc.queue_item(item);
     }
   });
   action_group.add_action(&queue_video);
 
-  let ct = current_track.clone();
+  let ci = current_item.clone();
   let cpid = current_playlist_id.clone();
   let store_for_remove = playlist_store.clone();
   let remove_track = gtk::gio::SimpleAction::new("remove-track", None);
   remove_track.connect_activate(move |_, _| {
     if let Some(playlist_id) = *cpid.borrow() {
-      if let Some(track) = ct.borrow().as_ref() {
-        if remove_track_from_playlist(playlist_id, &track.filename).is_ok() {
+      if let Some(item) = ci.borrow().as_ref() {
+        if remove_from_playlist(playlist_id, item).is_ok() {
+          let filename = item.track_filename().map(|s| s.to_string());
           for i in 0..store_for_remove.n_items() {
-            if let Some(item) = store_for_remove.item(i) {
-              if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-                if let Some(PlaylistItem::Track(t)) = try_get_item(&obj) {
-                  if t.filename == track.filename {
+            if let Some(store_item) = store_for_remove.item(i) {
+              if let Ok(obj) = store_item.downcast::<BoxedAnyObject>() {
+                if let Some(mi) = try_get_item(&obj) {
+                  if mi.track_filename().map(|s| s.to_string()) == filename {
                     store_for_remove.remove(i);
                     break;
                   }
@@ -699,19 +631,20 @@ pub fn create_playlist_view(
   });
   action_group.add_action(&remove_track);
 
-  let cv = current_video.clone();
+  let ci = current_item.clone();
   let cpid = current_playlist_id.clone();
   let store_for_remove = playlist_store.clone();
   let remove_video = gtk::gio::SimpleAction::new("remove-video", None);
   remove_video.connect_activate(move |_, _| {
     if let Some(playlist_id) = *cpid.borrow() {
-      if let Some(video) = cv.borrow().as_ref() {
-        if remove_video_from_playlist(playlist_id, video.id).is_ok() {
+      if let Some(item) = ci.borrow().as_ref() {
+        if remove_from_playlist(playlist_id, item).is_ok() {
+          let vid_id = item.video_db_id();
           for i in 0..store_for_remove.n_items() {
-            if let Some(item) = store_for_remove.item(i) {
-              if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-                if let Some(PlaylistItem::Video(v)) = try_get_item(&obj) {
-                  if v.id == video.id {
+            if let Some(store_item) = store_for_remove.item(i) {
+              if let Ok(obj) = store_item.downcast::<BoxedAnyObject>() {
+                if let Some(mi) = try_get_item(&obj) {
+                  if mi.video_db_id() == vid_id {
                     store_for_remove.remove(i);
                     break;
                   }
@@ -725,20 +658,21 @@ pub fn create_playlist_view(
   });
   action_group.add_action(&remove_video);
 
-  let ct = current_track.clone();
+  let ci = current_item.clone();
   let pc = playback_controller.clone();
   let store_for_queue_remove = playlist_store.clone();
   let is_queue = is_viewing_playback_queue.clone();
   let remove_track_from_queue = gtk::gio::SimpleAction::new("remove-track-from-queue", None);
   remove_track_from_queue.connect_activate(move |_, _| {
     if is_queue.get() {
-      if let Some(track) = ct.borrow().as_ref() {
-        pc.remove_from_queue_by_filename(&track.filename);
+      if let Some(item) = ci.borrow().as_ref() {
+        pc.remove_item_from_queue(item);
+        let filename = item.track_filename().map(|s| s.to_string());
         for i in 0..store_for_queue_remove.n_items() {
-          if let Some(item) = store_for_queue_remove.item(i) {
-            if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-              if let Some(PlaylistItem::Track(t)) = try_get_item(&obj) {
-                if t.filename == track.filename {
+          if let Some(store_item) = store_for_queue_remove.item(i) {
+            if let Ok(obj) = store_item.downcast::<BoxedAnyObject>() {
+              if let Some(mi) = try_get_item(&obj) {
+                if mi.track_filename().map(|s| s.to_string()) == filename {
                   store_for_queue_remove.remove(i);
                   break;
                 }
@@ -751,20 +685,21 @@ pub fn create_playlist_view(
   });
   action_group.add_action(&remove_track_from_queue);
 
-  let cv = current_video.clone();
+  let ci = current_item.clone();
   let pc = playback_controller.clone();
   let store_for_queue_remove = playlist_store.clone();
   let is_queue = is_viewing_playback_queue.clone();
   let remove_video_from_queue = gtk::gio::SimpleAction::new("remove-video-from-queue", None);
   remove_video_from_queue.connect_activate(move |_, _| {
     if is_queue.get() {
-      if let Some(video) = cv.borrow().as_ref() {
-        pc.remove_from_queue_by_video_id(video.id);
+      if let Some(item) = ci.borrow().as_ref() {
+        pc.remove_item_from_queue(item);
+        let vid_id = item.video_db_id();
         for i in 0..store_for_queue_remove.n_items() {
-          if let Some(item) = store_for_queue_remove.item(i) {
-            if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-              if let Some(PlaylistItem::Video(v)) = try_get_item(&obj) {
-                if v.id == video.id {
+          if let Some(store_item) = store_for_queue_remove.item(i) {
+            if let Ok(obj) = store_item.downcast::<BoxedAnyObject>() {
+              if let Some(mi) = try_get_item(&obj) {
+                if mi.video_db_id() == vid_id {
                   store_for_queue_remove.remove(i);
                   break;
                 }
@@ -780,8 +715,7 @@ pub fn create_playlist_view(
   playlist_columnview.insert_action_group("playlist", Some(&action_group));
 
   let gesture = GestureClick::builder().button(3).build();
-  let cv = current_video.clone();
-  let ct = current_track.clone();
+  let ci = current_item.clone();
   let video_pop = video_popover.clone();
   let track_pop = track_popover.clone();
   let store = playlist_store.clone();
@@ -819,16 +753,15 @@ pub fn create_playlist_view(
 
     if let Some(item) = store.item(pos) {
       if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
-        if let Some(playlist_item) = try_get_item(&obj) {
+        if let Some(media_item) = try_get_item(&obj) {
           let rect = gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1);
-          match playlist_item {
-            PlaylistItem::Video(video) => {
-              *cv.borrow_mut() = Some(video);
+          *ci.borrow_mut() = Some(media_item.clone());
+          match &media_item {
+            MediaItem::Video(_) => {
               video_pop.set_pointing_to(Some(&rect));
               video_pop.popup();
             }
-            PlaylistItem::Track(track) => {
-              *ct.borrow_mut() = Some(track);
+            MediaItem::Track(_) => {
               track_pop.set_pointing_to(Some(&rect));
               track_pop.popup();
             }
@@ -859,7 +792,7 @@ pub fn create_playlist_view(
     if let Some(item) = store_for_selection.item(pos) {
       if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
         if let Some(playlist_item) = try_get_item(&obj) {
-          if let PlaylistItem::Track(track) = playlist_item {
+          if let MediaItem::Track(track) = playlist_item {
             pc_for_selection.show_track_album_art(&track);
           }
         }
@@ -870,17 +803,6 @@ pub fn create_playlist_view(
   ScrolledWindow::builder()
     .child(&playlist_columnview)
     .build()
-}
-
-fn format_duration(seconds: Option<i32>) -> String {
-  match seconds {
-    Some(s) => {
-      let mins = s / 60;
-      let secs = s % 60;
-      format!("{mins}:{secs:02}")
-    }
-    None => "?:??".to_string(),
-  }
 }
 
 fn parse_youtube_title(title: &str) -> (String, String) {
