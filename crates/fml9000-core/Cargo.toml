@@ -14,5 +14,6 @@ serde = { workspace = true }
 toml = { workspace = true }
 rodio = { workspace = true }
 ureq = { workspace = true }
+serde_json = { workspace = true }
 lofty = "0"
 walkdir = "2"

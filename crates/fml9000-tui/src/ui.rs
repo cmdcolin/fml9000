@@ -1,4 +1,4 @@
-use crate::app::{App, Panel, UiMode};
+use crate::app::{App, NavItem, Panel, UiMode};
 use fml9000_core::MediaItem;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -38,6 +38,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         UiMode::NewPlaylistInput => render_new_playlist_input(f, app),
         UiMode::PlaylistContextMenu => render_playlist_menu(f, app),
         UiMode::RenamePlaylistInput => render_rename_playlist_input(f, app),
+        UiMode::AddYouTubeChannel => render_add_youtube_input(f, app),
         UiMode::Help => render_help(f),
         UiMode::Normal => {}
     }
@@ -151,7 +152,7 @@ fn render_main_content(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20),  // Navigation panel
+            Constraint::Length(24),  // Navigation panel
             Constraint::Min(40),     // Track list
         ])
         .split(area);
@@ -168,28 +169,42 @@ fn render_navigation(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(DIM_COLOR)
     };
 
-    let nav_count = app.nav_item_count();
-    let items: Vec<Row> = (0..nav_count).map(|i| {
-        let name = app.nav_item_name(i);
-        // Icons for fixed items (first 4), playlists get ♫ from nav_item_name
-        let prefix = match i {
-            0 => "♫",  // All Tracks
-            1 => "⋮",  // Queue
-            2 => "⏮",  // Recently Played
-            3 => "✚",  // Recently Added
-            _ => " ",  // Playlists already have ♫ in name
-        };
-
-        let display_name = if i < 4 {
-            format!(" {} {}", prefix, name)
-        } else {
-            format!(" {}", name)  // Playlist names already include icon
+    let nav_items = app.build_nav_items();
+    let items: Vec<Row> = nav_items.iter().enumerate().map(|(i, item)| {
+        let (display_name, is_header) = match item {
+            NavItem::SectionHeader(section_id, name) => {
+                let expanded = match section_id {
+                    crate::app::SectionId::AutoPlaylists => app.section_expanded[0],
+                    crate::app::SectionId::UserPlaylists => app.section_expanded[1],
+                    crate::app::SectionId::YouTubeChannels => app.section_expanded[2],
+                };
+                let arrow = if expanded { "▼" } else { "▶" };
+                (format!("{} {}", arrow, name), true)
+            }
+            NavItem::AutoPlaylist(idx, name) => {
+                let icon = match idx {
+                    0 => "♫",
+                    1 => "⋮",
+                    2 => "⏮",
+                    3 => "✚",
+                    _ => " ",
+                };
+                (format!("  {} {}", icon, name), false)
+            }
+            NavItem::UserPlaylist(_, name) => {
+                (format!("  ♫ {}", name), false)
+            }
+            NavItem::YouTubeChannel(_, name) => {
+                (format!("  📺 {}", name), false)
+            }
         };
 
         let style = if app.nav_state.selected() == Some(i) && is_active {
             Style::default().fg(Color::Black).bg(HIGHLIGHT_COLOR)
         } else if app.nav_state.selected() == Some(i) {
             Style::default().fg(HIGHLIGHT_COLOR)
+        } else if is_header {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -311,7 +326,11 @@ fn render_track_list(f: &mut Frame, app: &mut App, area: Rect) {
             false
         };
 
-        let playing_indicator = if is_playing { "▶ " } else { "  " };
+        let playing_indicator = if is_playing {
+            if app.mpv_paused || app.audio.is_paused() { "⏸ " } else { "▶ " }
+        } else {
+            "  "
+        };
 
         let style = if selected == actual_idx && is_active {
             Style::default().fg(Color::Black).bg(HIGHLIGHT_COLOR)
@@ -413,7 +432,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
     let help_text = if app.is_searching {
         "[Enter] Play  [Esc] Cancel search  [Backspace] Delete char"
     } else {
-        "[?] Help  [/] Search  [Space] Play/Pause  [n/p] Next/Prev  [a] Queue  [s] Shuffle  [r] Repeat  [q] Quit"
+        "[?] Help  [/] Search  [Space] Play/Pause  [n/p] Next/Prev  [a] Queue  [y] Add YT  [s] Shuffle  [r] Repeat  [q] Quit"
     };
 
     let status = if let Some(ref msg) = app.status_message {
@@ -578,6 +597,25 @@ fn render_rename_playlist_input(f: &mut Frame, app: &App) {
     f.render_widget(paragraph, area);
 }
 
+fn render_add_youtube_input(f: &mut Frame, app: &App) {
+    let width = 50;
+    let height = 3;
+    let area = centered_rect(width, height, f.area());
+
+    f.render_widget(Clear, area);
+
+    let input_text = format!(" {}█", app.youtube_channel_url);
+    let paragraph = Paragraph::new(input_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(ACCENT_COLOR))
+                .title(" Add YouTube Channel (URL or @handle) ")
+        );
+
+    f.render_widget(paragraph, area);
+}
+
 fn render_help(f: &mut Frame) {
     let help_text = vec![
         "",
@@ -602,6 +640,7 @@ fn render_help(f: &mut Frame) {
         "  Actions",
         "  ──────────────────────────────",
         "  a             Add to queue",
+        "  y             Add YouTube channel",
         "  Right-click   Context menu",
         "  Double-click  Play track",
         "",

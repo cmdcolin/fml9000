@@ -1,7 +1,7 @@
 mod app;
 mod ui;
 
-use app::{App, Panel, UiMode};
+use app::{App, NavItem, Panel, UiMode};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind},
     execute,
@@ -50,6 +50,9 @@ async fn main() -> io::Result<()> {
 
     let result = run_app(&mut terminal, &mut app).await;
 
+    app.save_state();
+    info!("App state saved");
+
     // Restore terminal
     disable_raw_mode()?;
     execute!(
@@ -66,8 +69,8 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-async fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
+async fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> io::Result<()> {
     let mut last_tick = std::time::Instant::now();
@@ -112,6 +115,7 @@ fn handle_event(app: &mut App, event: &Event, size: Size) -> io::Result<bool> {
         UiMode::NewPlaylistInput => return handle_new_playlist_event(app, event, size),
         UiMode::PlaylistContextMenu => return handle_playlist_menu_event(app, event, size),
         UiMode::RenamePlaylistInput => return handle_rename_playlist_event(app, event, size),
+        UiMode::AddYouTubeChannel => return handle_add_youtube_event(app, event, size),
         UiMode::Help => return handle_help_event(app, event),
         UiMode::Normal => {}
     }
@@ -180,6 +184,16 @@ fn handle_event(app: &mut App, event: &Event, size: Size) -> io::Result<bool> {
                         app.track_down();
                     }
                 }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if app.active_panel == Panel::Navigation {
+                        app.expand_or_collapse_nav(false);
+                    }
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if app.active_panel == Panel::Navigation {
+                        app.expand_or_collapse_nav(true);
+                    }
+                }
                 KeyCode::Char('n') => app.play_next(),
                 KeyCode::Char('p') => app.play_prev(),
                 KeyCode::Char('s') => {
@@ -192,26 +206,12 @@ fn handle_event(app: &mut App, event: &Event, size: Size) -> io::Result<bool> {
                 KeyCode::Char('S') => app.toggle_shuffle(),
                 KeyCode::Char('r') => app.cycle_repeat(),
                 KeyCode::Char('a') => app.queue_selected(),
-                KeyCode::Char('1') => {
-                    app.nav_state.select(Some(0));
-                    app.select_nav();
-                }
-                KeyCode::Char('2') => {
-                    app.nav_state.select(Some(1));
-                    app.select_nav();
-                }
-                KeyCode::Char('3') => {
-                    app.nav_state.select(Some(2));
-                    app.select_nav();
-                }
-                KeyCode::Char('4') => {
-                    app.nav_state.select(Some(3));
-                    app.select_nav();
-                }
-                KeyCode::Char('5') => {
-                    app.nav_state.select(Some(4));
-                    app.select_nav();
-                }
+                KeyCode::Char('1') => app.select_nav_leaf(0),
+                KeyCode::Char('2') => app.select_nav_leaf(1),
+                KeyCode::Char('3') => app.select_nav_leaf(2),
+                KeyCode::Char('4') => app.select_nav_leaf(3),
+                KeyCode::Char('5') => app.select_nav_leaf(4),
+                KeyCode::Char('y') => app.open_add_youtube(),
                 _ => {}
             }
         }
@@ -427,6 +427,42 @@ fn handle_rename_playlist_event(app: &mut App, event: &Event, size: Size) -> io:
     Ok(false)
 }
 
+fn handle_add_youtube_event(app: &mut App, event: &Event, size: Size) -> io::Result<bool> {
+    match event {
+        Event::Key(key) => {
+            if key.kind != KeyEventKind::Press {
+                return Ok(false);
+            }
+            match key.code {
+                KeyCode::Esc => app.close_add_youtube(),
+                KeyCode::Enter => app.youtube_submit(),
+                KeyCode::Backspace => app.youtube_backspace(),
+                KeyCode::Char(c) => app.youtube_input(c),
+                _ => {}
+            }
+        }
+        Event::Mouse(mouse) => {
+            let width: u16 = 50;
+            let height: u16 = 3;
+            let popup_x = (size.width.saturating_sub(width)) / 2;
+            let popup_y = (size.height.saturating_sub(height)) / 2;
+
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if !(mouse.column >= popup_x && mouse.column < popup_x + width
+                        && mouse.row >= popup_y && mouse.row < popup_y + height)
+                    {
+                        app.close_add_youtube();
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
 fn handle_help_event(app: &mut App, event: &Event) -> io::Result<bool> {
     match event {
         Event::Key(key) => {
@@ -458,10 +494,17 @@ fn handle_mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u16, size: S
     let main_content_end = size.height.saturating_sub(1);
 
     // Navigation panel is 20 columns wide (including border)
-    let nav_panel_width = 20u16;
+    let nav_panel_width = 24u16;
 
     match kind {
         MouseEventKind::Down(button) => {
+            // Check if click is on the progress bar (rows 3-4)
+            if (row == 3 || row == 4) && button == MouseButton::Left && size.width > 0 {
+                let ratio = col as f64 / size.width as f64;
+                app.seek_ratio(ratio);
+                return;
+            }
+
             // Check if click is in main content area
             if row >= main_content_start && row < main_content_end {
                 let content_row = row - main_content_start;
@@ -472,18 +515,14 @@ fn handle_mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u16, size: S
                     // Account for border (1 row)
                     if content_row >= 1 {
                         let nav_idx = (content_row - 1) as usize;
-                        if nav_idx < app.nav_item_count() {
+                        let nav_items = app.build_nav_items();
+                        if nav_idx < nav_items.len() {
                             app.nav_state.select(Some(nav_idx));
                             if button == MouseButton::Left {
                                 app.select_nav();
                             } else if button == MouseButton::Right {
-                                // Right-click on a playlist (index >= 4 means it's a playlist)
-                                let fixed_count = 4; // All Tracks, Queue, Recently Played, Recently Added
-                                if nav_idx >= fixed_count {
-                                    let playlist_idx = nav_idx - fixed_count;
-                                    if let Some(playlist) = app.playlists.get(playlist_idx) {
-                                        app.open_playlist_menu(playlist.id, playlist.name.clone());
-                                    }
+                                if let Some(NavItem::UserPlaylist(id, name)) = nav_items.get(nav_idx) {
+                                    app.open_playlist_menu(*id, name.clone());
                                 }
                             }
                         }

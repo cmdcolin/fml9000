@@ -5,9 +5,9 @@ use crate::settings::FmlSettings;
 use crate::youtube_add_dialog;
 use adw::prelude::*;
 use fml9000_core::{
-  add_to_playlist, delete_playlist, get_playlist_items, get_queue_items, get_user_playlists,
-  get_videos_for_channel, get_youtube_channels, load_recently_added_items,
-  load_recently_played_items, rename_playlist, MediaItem,
+  add_to_playlist, delete_playlist, get_all_media, get_all_videos, get_playlist_items,
+  get_queue_items, get_user_playlists, get_videos_for_channel, get_youtube_channels,
+  load_recently_added_items, load_recently_played_items, load_tracks, rename_playlist, MediaItem,
 };
 use gtk::gdk;
 use gtk::gio::ListStore;
@@ -19,6 +19,9 @@ use std::rc::Rc;
 
 #[derive(Clone, PartialEq)]
 enum PlaylistType {
+  AllMedia,
+  AllTracks,
+  AllVideos,
   RecentlyAdded,
   RecentlyPlayed,
   PlaybackQueue,
@@ -47,6 +50,18 @@ fn build_children_store(kind: &SectionKind) -> ListStore {
   let store = ListStore::new::<BoxedAnyObject>();
   match kind {
     SectionKind::AutoPlaylists => {
+      store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+        name: "All Media".to_string(),
+        playlist_type: PlaylistType::AllMedia,
+      })));
+      store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+        name: "All Tracks".to_string(),
+        playlist_type: PlaylistType::AllTracks,
+      })));
+      store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+        name: "All Videos".to_string(),
+        playlist_type: PlaylistType::AllVideos,
+      })));
       store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
         name: "Recently added".to_string(),
         playlist_type: PlaylistType::RecentlyAdded,
@@ -311,6 +326,24 @@ pub fn create_playlist_manager(
       }
 
       match &playlist.playlist_type {
+        PlaylistType::AllMedia => {
+          *current_playlist_id_clone.borrow_mut() = None;
+          let items = get_all_media();
+          load_media_items(&items, &main_playlist_store_clone);
+        }
+        PlaylistType::AllTracks => {
+          *current_playlist_id_clone.borrow_mut() = None;
+          let tracks = load_tracks().unwrap_or_default();
+          let items: Vec<MediaItem> = tracks.into_iter().map(MediaItem::Track).collect();
+          load_media_items(&items, &main_playlist_store_clone);
+        }
+        PlaylistType::AllVideos => {
+          *current_playlist_id_clone.borrow_mut() = None;
+          if let Ok(videos) = get_all_videos() {
+            let items: Vec<MediaItem> = videos.into_iter().map(MediaItem::Video).collect();
+            load_media_items(&items, &main_playlist_store_clone);
+          }
+        }
         PlaylistType::RecentlyAdded => {
           *current_playlist_id_clone.borrow_mut() = None;
           let items = load_recently_added_items(0);

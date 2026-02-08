@@ -25,6 +25,10 @@ A music player written in Rust with GTK4-rs
 ## Screenshot
 
 ![](img/1.png)
+GUI with GTK
+
+![](img/2.png)
+TUI for the terminal, uses same database
 
 
 ## Usage

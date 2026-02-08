@@ -497,6 +497,18 @@ pub fn load_video_by_id(vid_id: i32) -> Option<Arc<YouTubeVideo>> {
     .map(Arc::new)
 }
 
+pub fn load_video_by_video_id(vid_id: &str) -> Option<Arc<YouTubeVideo>> {
+  use crate::schema::youtube_videos;
+
+  let mut conn = connect_db().ok()?;
+
+  youtube_videos::table
+    .filter(youtube_videos::video_id.eq(vid_id))
+    .first::<YouTubeVideo>(&mut conn)
+    .ok()
+    .map(Arc::new)
+}
+
 pub fn build_facets(tracks_list: &[Arc<Track>]) -> Vec<Facet> {
   let mut facets = HashSet::new();
   for row in tracks_list {
@@ -591,6 +603,30 @@ pub fn add_youtube_videos(
   }
 
   Ok(())
+}
+
+pub fn get_all_media() -> Vec<MediaItem> {
+  let mut items: Vec<MediaItem> = load_tracks()
+    .unwrap_or_default()
+    .into_iter()
+    .map(MediaItem::Track)
+    .collect();
+  for v in get_all_videos().unwrap_or_default() {
+    items.push(MediaItem::Video(v));
+  }
+  items
+}
+
+pub fn get_all_videos() -> Result<Vec<Arc<YouTubeVideo>>, String> {
+  use crate::models::YouTubeVideo;
+
+  let mut conn = connect_db()?;
+
+  youtube_videos::table
+    .order(youtube_videos::published_at.desc())
+    .load::<YouTubeVideo>(&mut conn)
+    .map(|v| v.into_iter().map(Arc::new).collect())
+    .map_err(|e| format!("Failed to load videos: {e}"))
 }
 
 pub fn get_videos_for_channel(db_channel_id: i32) -> Result<Vec<Arc<YouTubeVideo>>, String> {

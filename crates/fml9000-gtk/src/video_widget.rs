@@ -9,7 +9,7 @@ use std::time::Duration;
 
 pub fn open_in_browser(video_id: &str) {
     let url = format!("https://www.youtube.com/watch?v={video_id}");
-    let _ = Command::new("xdg-open").arg(&url).spawn();
+    let _ = open::that(&url);
 }
 
 pub struct VideoWidget {

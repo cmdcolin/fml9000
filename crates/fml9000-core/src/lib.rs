@@ -4,6 +4,7 @@ pub mod media_item;
 pub mod models;
 pub mod schema;
 pub mod settings;
+pub mod youtube;
 pub mod youtube_api;
 
 // Re-exports for convenience

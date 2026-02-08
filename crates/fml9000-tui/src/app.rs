@@ -1,12 +1,15 @@
 use fml9000_core::{
-    AudioPlayer, Track, YouTubeVideo, Playlist, MediaItem,
-    load_tracks, get_user_playlists, get_queue_items, get_playlist_items,
+    AudioPlayer, Track, YouTubeVideo, YouTubeChannel, Playlist, MediaItem,
+    load_tracks, get_all_media, get_all_videos, get_user_playlists, get_queue_items,
+    get_playlist_items, get_youtube_channels, get_videos_for_channel,
     load_recently_played_items, load_recently_added_items, queue_len, pop_queue_front,
     add_to_queue, mark_as_played, update_play_stats,
     create_playlist, add_to_playlist, delete_playlist,
-    rename_playlist,
+    rename_playlist, load_video_by_video_id,
+    add_youtube_channel, add_youtube_videos,
 };
-use fml9000_core::settings::{CoreSettings, RepeatMode};
+use fml9000_core::youtube::{fetch_channel_info, ChannelInfo, VideoInfo};
+use fml9000_core::settings::{AppState, CoreSettings, RepeatMode, read_state, write_state};
 use ratatui::widgets::TableState;
 use rodio::source::Source;
 use rodio::Decoder;
@@ -16,7 +19,7 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use tracing::info;
 
@@ -28,11 +31,29 @@ pub enum Panel {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum NavSection {
+    AllMedia,
     AllTracks,
+    AllVideos,
     Playlists,
     Queue,
     RecentlyPlayed,
     RecentlyAdded,
+    YouTubeChannel,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SectionId {
+    AutoPlaylists,
+    UserPlaylists,
+    YouTubeChannels,
+}
+
+#[derive(Clone)]
+pub enum NavItem {
+    SectionHeader(SectionId, String),
+    AutoPlaylist(usize, String),   // (fixed_index, name)
+    UserPlaylist(i32, String),     // (playlist_id, name)
+    YouTubeChannel(i32, String),   // (channel_id, name)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -43,7 +64,13 @@ pub enum UiMode {
     NewPlaylistInput,
     PlaylistContextMenu,
     RenamePlaylistInput,
+    AddYouTubeChannel,
     Help,
+}
+
+pub enum YouTubeFetchResult {
+    Success(ChannelInfo, Vec<VideoInfo>),
+    Error(String),
 }
 
 pub struct ContextMenu {
@@ -64,6 +91,7 @@ pub struct App {
     pub audio_error: Option<String>,
     pub tracks: Vec<Arc<Track>>,
     pub playlists: Vec<Arc<Playlist>>,
+    pub channels: Vec<Arc<YouTubeChannel>>,
     pub displayed_items: Vec<MediaItem>,
     pub nav_state: TableState,
     pub track_state: TableState,
@@ -85,6 +113,8 @@ pub struct App {
     pub status_message: Option<String>,
     pub scroll_offset: usize,
     pub visible_height: usize,
+    // Section expand/collapse state
+    pub section_expanded: [bool; 3], // AutoPlaylists, UserPlaylists, YouTubeChannels
     // Context menu state
     pub ui_mode: UiMode,
     pub context_menu: Option<ContextMenu>,
@@ -94,6 +124,10 @@ pub struct App {
     pub rename_playlist_name: String,
     // Double-click tracking
     pub last_click: Option<(Instant, usize)>, // (time, track_idx)
+    // YouTube channel add state
+    pub youtube_channel_url: String,
+    pub youtube_fetch_rx: Option<mpsc::Receiver<YouTubeFetchResult>>,
+    pub youtube_fetch_tick: u8,
 }
 
 #[derive(Clone)]
@@ -131,12 +165,13 @@ impl App {
         let playlists = get_user_playlists().unwrap_or_default();
         info!("Loaded {} playlists in {:?}", playlists.len(), playlists_start.elapsed());
 
-        let displayed_items: Vec<MediaItem> = tracks.iter()
-            .map(|t| MediaItem::Track(t.clone()))
-            .collect();
+        let channels = get_youtube_channels().unwrap_or_default();
+        info!("Loaded {} YouTube channels", channels.len());
+
+        let displayed_items = get_all_media();
 
         let mut nav_state = TableState::default();
-        nav_state.select(Some(0));
+        nav_state.select(Some(1));
 
         let mut track_state = TableState::default();
         if !displayed_items.is_empty() {
@@ -145,16 +180,17 @@ impl App {
 
         info!("App::new() completed in {:?}", start.elapsed());
 
-        App {
+        let mut app = App {
             audio,
             audio_error,
             tracks,
             playlists,
+            channels,
             displayed_items,
             nav_state,
             track_state,
             active_panel: Panel::TrackList,
-            current_nav: NavSection::AllTracks,
+            current_nav: NavSection::AllMedia,
             current_playlist_id: None,
             now_playing: None,
             now_playing_video: None,
@@ -171,6 +207,7 @@ impl App {
             status_message: None,
             scroll_offset: 0,
             visible_height: 20,
+            section_expanded: [true, true, true],
             ui_mode: UiMode::Normal,
             context_menu: None,
             playlist_select_idx: 0,
@@ -178,7 +215,15 @@ impl App {
             playlist_menu: None,
             rename_playlist_name: String::new(),
             last_click: None,
-        }
+            youtube_channel_url: String::new(),
+            youtube_fetch_rx: None,
+            youtube_fetch_tick: 0,
+        };
+
+        app.restore_state();
+        info!("State restored");
+
+        app
     }
 
     pub fn on_tick(&mut self) {
@@ -236,22 +281,77 @@ impl App {
             self.cleanup_mpv();
             self.play_next();
         }
+
+        self.check_youtube_fetch();
     }
 
-    const FIXED_NAV_ITEMS: [&'static str; 4] = ["All Tracks", "Queue", "Recently Played", "Recently Added"];
+    const AUTO_PLAYLISTS: [&'static str; 6] = ["All Media", "All Tracks", "All Videos", "Queue", "Recently Played", "Recently Added"];
+
+    pub fn build_nav_items(&self) -> Vec<NavItem> {
+        let mut items = Vec::new();
+
+        items.push(NavItem::SectionHeader(SectionId::AutoPlaylists, "Auto Playlists".to_string()));
+        if self.section_expanded[0] {
+            for (i, name) in Self::AUTO_PLAYLISTS.iter().enumerate() {
+                items.push(NavItem::AutoPlaylist(i, name.to_string()));
+            }
+        }
+
+        items.push(NavItem::SectionHeader(SectionId::UserPlaylists, "Playlists".to_string()));
+        if self.section_expanded[1] {
+            for playlist in &self.playlists {
+                items.push(NavItem::UserPlaylist(playlist.id, playlist.name.clone()));
+            }
+        }
+
+        items.push(NavItem::SectionHeader(SectionId::YouTubeChannels, "YouTube Channels".to_string()));
+        if self.section_expanded[2] {
+            for channel in &self.channels {
+                items.push(NavItem::YouTubeChannel(channel.id, channel.name.clone()));
+            }
+        }
+
+        items
+    }
 
     pub fn nav_item_count(&self) -> usize {
-        Self::FIXED_NAV_ITEMS.len() + self.playlists.len()
+        self.build_nav_items().len()
     }
 
-    pub fn nav_item_name(&self, idx: usize) -> String {
-        if idx < Self::FIXED_NAV_ITEMS.len() {
-            Self::FIXED_NAV_ITEMS[idx].to_string()
-        } else {
-            let playlist_idx = idx - Self::FIXED_NAV_ITEMS.len();
-            self.playlists.get(playlist_idx)
-                .map(|p| format!("♫ {}", p.name))
-                .unwrap_or_else(|| "Unknown".to_string())
+    pub fn toggle_section(&mut self, section: SectionId) {
+        let idx = match section {
+            SectionId::AutoPlaylists => 0,
+            SectionId::UserPlaylists => 1,
+            SectionId::YouTubeChannels => 2,
+        };
+        self.section_expanded[idx] = !self.section_expanded[idx];
+    }
+
+    pub fn expand_or_collapse_nav(&mut self, expand: bool) {
+        let selected = self.nav_state.selected().unwrap_or(0);
+        let items = self.build_nav_items();
+        if let Some(NavItem::SectionHeader(section, _)) = items.get(selected) {
+            let idx = match section {
+                SectionId::AutoPlaylists => 0,
+                SectionId::UserPlaylists => 1,
+                SectionId::YouTubeChannels => 2,
+            };
+            self.section_expanded[idx] = expand;
+        }
+    }
+
+    pub fn select_nav_leaf(&mut self, leaf_index: usize) {
+        let items = self.build_nav_items();
+        let mut count = 0;
+        for (i, item) in items.iter().enumerate() {
+            if !matches!(item, NavItem::SectionHeader(_, _)) {
+                if count == leaf_index {
+                    self.nav_state.select(Some(i));
+                    self.select_nav();
+                    return;
+                }
+                count += 1;
+            }
         }
     }
 
@@ -309,25 +409,42 @@ impl App {
 
     pub fn select_nav(&mut self) {
         let selected = self.nav_state.selected().unwrap_or(0);
-        let fixed_count = Self::FIXED_NAV_ITEMS.len();
+        let items = self.build_nav_items();
+        let Some(item) = items.get(selected) else {
+            return;
+        };
 
-        if selected < fixed_count {
-            match selected {
-                0 => self.load_all_tracks(),
-                1 => self.load_queue(),
-                2 => self.load_recently_played(),
-                3 => self.load_recently_added(),
-                _ => {}
+        match item {
+            NavItem::SectionHeader(section, _) => {
+                self.toggle_section(*section);
+                return;
             }
-        } else {
-            // It's a playlist
-            let playlist_idx = selected - fixed_count;
-            if let Some(playlist) = self.playlists.get(playlist_idx) {
-                self.load_playlist(playlist.id);
+            NavItem::AutoPlaylist(idx, _) => {
+                match idx {
+                    0 => self.load_all_media(),
+                    1 => self.load_all_tracks(),
+                    2 => self.load_all_videos(),
+                    3 => self.load_queue(),
+                    4 => self.load_recently_played(),
+                    5 => self.load_recently_added(),
+                    _ => {}
+                }
+            }
+            NavItem::UserPlaylist(id, _) => {
+                self.load_playlist(*id);
+            }
+            NavItem::YouTubeChannel(id, _) => {
+                self.load_youtube_channel(*id);
             }
         }
         self.track_state.select(if self.displayed_items.is_empty() { None } else { Some(0) });
         self.scroll_offset = 0;
+    }
+
+    fn load_all_media(&mut self) {
+        self.current_nav = NavSection::AllMedia;
+        self.current_playlist_id = None;
+        self.displayed_items = get_all_media();
     }
 
     fn load_all_tracks(&mut self) {
@@ -335,6 +452,16 @@ impl App {
         self.current_playlist_id = None;
         self.displayed_items = self.tracks.iter()
             .map(|t| MediaItem::Track(t.clone()))
+            .collect();
+    }
+
+    fn load_all_videos(&mut self) {
+        self.current_nav = NavSection::AllVideos;
+        self.current_playlist_id = None;
+        self.displayed_items = get_all_videos()
+            .unwrap_or_default()
+            .into_iter()
+            .map(MediaItem::Video)
             .collect();
     }
 
@@ -370,6 +497,20 @@ impl App {
         self.displayed_items = load_recently_added_items(100);
     }
 
+    fn load_youtube_channel(&mut self, channel_id: i32) {
+        self.current_nav = NavSection::YouTubeChannel;
+        self.current_playlist_id = None;
+        match get_videos_for_channel(channel_id) {
+            Ok(videos) => {
+                self.displayed_items = videos.into_iter().map(|v| MediaItem::Video(v)).collect();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to load channel: {}", e));
+                self.displayed_items.clear();
+            }
+        }
+    }
+
     pub fn play_selected(&mut self) {
         let selected_idx = if self.is_searching && !self.filtered_indices.is_empty() {
             self.track_state.selected()
@@ -386,6 +527,8 @@ impl App {
     }
 
     fn play_track(&mut self, track: Arc<Track>) {
+        self.cleanup_mpv();
+
         let filename = &track.filename;
 
         let file = match File::open(filename) {
@@ -451,6 +594,28 @@ impl App {
                     play_counted: false,
                 });
                 self.status_message = None;
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to start mpv: {}. Is mpv installed?", e));
+            }
+        }
+    }
+
+    fn play_in_external_mpv(&mut self, item: MediaItem) {
+        let url = match &item {
+            MediaItem::Track(track) => track.filename.clone(),
+            MediaItem::Video(video) => format!("https://www.youtube.com/watch?v={}", video.video_id),
+        };
+
+        match Command::new("mpv")
+            .arg(&url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(_) => {
+                self.status_message = Some(format!("Opened in mpv: {}", item.title()));
             }
             Err(e) => {
                 self.status_message = Some(format!("Failed to start mpv: {}. Is mpv installed?", e));
@@ -572,7 +737,7 @@ impl App {
             }
 
             let next_idx = if self.shuffle_enabled {
-                use rand::Rng;
+                use rand::RngExt;
                 let mut rng = rand::rng();
                 rng.random_range(0..len)
             } else if current_idx + 1 < len {
@@ -695,6 +860,30 @@ impl App {
             .collect();
     }
 
+    pub fn seek_ratio(&mut self, ratio: f64) {
+        let ratio = ratio.clamp(0.0, 1.0);
+
+        if self.mpv_process.is_some() {
+            if let Some(ref npv) = self.now_playing_video {
+                if let Some(dur) = npv.video.duration_seconds {
+                    let target_secs = (dur as f64 * ratio) as u64;
+                    let cmd = format!("[\"seek\", {}, \"absolute\"]", target_secs);
+                    if self.send_mpv_command(&cmd) {
+                        if let Some(ref mut npv) = self.now_playing_video {
+                            npv.accumulated_secs = target_secs;
+                            npv.started_at = std::time::Instant::now();
+                        }
+                    }
+                }
+            }
+        } else if let Some(ref np) = self.now_playing {
+            if let Some(duration) = np.duration {
+                let target = Duration::from_secs_f64(duration.as_secs_f64() * ratio);
+                self.audio.try_seek(target);
+            }
+        }
+    }
+
     pub fn get_playback_position(&self) -> Option<(Duration, Duration)> {
         if let Some(ref np) = self.now_playing {
             let pos = self.audio.get_pos();
@@ -764,7 +953,13 @@ impl App {
         self.context_menu = Some(ContextMenu {
             track_idx,
             selected: 0,
-            items: vec!["Add to queue", "Add to playlist", "Create new playlist"],
+            items: {
+                let mut items = vec!["Add to queue", "Add to playlist", "Create new playlist", "Play in mpv"];
+                if let Some(MediaItem::Video(_)) = self.displayed_items.get(track_idx) {
+                    items.push("Open in browser");
+                }
+                items
+            },
         });
         self.ui_mode = UiMode::ContextMenu;
     }
@@ -818,6 +1013,28 @@ impl App {
                 // Create new playlist
                 self.new_playlist_name.clear();
                 self.ui_mode = UiMode::NewPlaylistInput;
+            }
+            3 => {
+                // Play in external mpv
+                if let Some(item) = self.displayed_items.get(track_idx) {
+                    self.play_in_external_mpv(item.clone());
+                }
+                self.close_context_menu();
+            }
+            4 => {
+                // Open in browser (YouTube only)
+                if let Some(MediaItem::Video(video)) = self.displayed_items.get(track_idx) {
+                    let url = format!("https://www.youtube.com/watch?v={}", video.video_id);
+                    match open::that(&url) {
+                        Ok(()) => {
+                            self.status_message = Some(format!("Opened in browser: {}", video.title));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Failed to open browser: {}", e));
+                        }
+                    }
+                }
+                self.close_context_menu();
             }
             _ => {}
         }
@@ -974,7 +1191,7 @@ impl App {
                         if let Some(sel) = self.nav_state.selected() {
                             if sel >= nav_count {
                                 self.nav_state.select(Some(0));
-                                self.load_all_tracks();
+                                self.load_all_media();
                             }
                         }
                     }
@@ -1021,6 +1238,120 @@ impl App {
         self.close_playlist_menu();
     }
 
+    pub fn save_state(&self) {
+        let nav_section = match self.current_nav {
+            NavSection::AllMedia => "all_media",
+            NavSection::AllTracks => "all_tracks",
+            NavSection::AllVideos => "all_videos",
+            NavSection::Playlists => "playlists",
+            NavSection::Queue => "queue",
+            NavSection::RecentlyPlayed => "recently_played",
+            NavSection::RecentlyAdded => "recently_added",
+            NavSection::YouTubeChannel => "youtube_channel",
+        };
+
+        let playing_track = self.now_playing.as_ref().map(|np| np.track.filename.clone());
+        let playing_video_id = self.now_playing_video.as_ref().map(|npv| npv.video.video_id.clone());
+
+        let playback_position_secs = if self.now_playing.is_some() {
+            self.audio.get_pos().as_secs_f64()
+        } else if self.now_playing_video.is_some() {
+            self.get_youtube_elapsed_secs() as f64
+        } else {
+            0.0
+        };
+
+        let channel_id = if self.current_nav == NavSection::YouTubeChannel {
+            // Find the channel id from the nav selection
+            let items = self.build_nav_items();
+            if let Some(sel) = self.nav_state.selected() {
+                if let Some(NavItem::YouTubeChannel(id, _)) = items.get(sel) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let active_panel = match self.active_panel {
+            Panel::Navigation => "navigation",
+            Panel::TrackList => "track_list",
+        };
+
+        let state = AppState {
+            playing_track,
+            playing_video_id,
+            playback_position_secs,
+            nav_section: nav_section.to_string(),
+            playlist_id: self.current_playlist_id,
+            channel_id,
+            nav_index: self.nav_state.selected().unwrap_or(0),
+            track_index: self.track_state.selected().unwrap_or(0),
+            scroll_offset: self.scroll_offset,
+            section_expanded: self.section_expanded,
+            active_panel: active_panel.to_string(),
+        };
+
+        if let Err(e) = write_state(&state) {
+            eprintln!("Failed to save state: {}", e);
+        }
+    }
+
+    pub fn restore_state(&mut self) {
+        let state = read_state();
+
+        self.section_expanded = state.section_expanded;
+
+        self.active_panel = match state.active_panel.as_str() {
+            "navigation" => Panel::Navigation,
+            _ => Panel::TrackList,
+        };
+
+        match state.nav_section.as_str() {
+            "all_media" => self.load_all_media(),
+            "all_tracks" => self.load_all_tracks(),
+            "all_videos" => self.load_all_videos(),
+            "playlists" => {
+                if let Some(id) = state.playlist_id {
+                    self.load_playlist(id);
+                }
+            }
+            "queue" => self.load_queue(),
+            "recently_played" => self.load_recently_played(),
+            "recently_added" => self.load_recently_added(),
+            "youtube_channel" => {
+                if let Some(id) = state.channel_id {
+                    self.load_youtube_channel(id);
+                }
+            }
+            _ => {}
+        }
+
+        self.nav_state.select(Some(state.nav_index));
+        if !self.displayed_items.is_empty() {
+            self.track_state.select(Some(state.track_index.min(self.displayed_items.len().saturating_sub(1))));
+        }
+        self.scroll_offset = state.scroll_offset;
+
+        if let Some(ref filename) = state.playing_track {
+            if let Some(track) = self.tracks.iter().find(|t| t.filename == *filename).cloned() {
+                self.play_track(track);
+                if state.playback_position_secs > 0.0 {
+                    let target = Duration::from_secs_f64(state.playback_position_secs);
+                    self.audio.try_seek(target);
+                }
+            }
+        } else if let Some(ref video_id) = state.playing_video_id {
+            if let Some(video) = load_video_by_video_id(video_id) {
+                self.play_youtube(video);
+            }
+        }
+    }
+
     // Help screen
     pub fn show_help(&mut self) {
         self.ui_mode = UiMode::Help;
@@ -1028,6 +1359,121 @@ impl App {
 
     pub fn close_help(&mut self) {
         self.ui_mode = UiMode::Normal;
+    }
+
+    pub fn is_youtube_fetching(&self) -> bool {
+        self.youtube_fetch_rx.is_some()
+    }
+
+    // YouTube channel add methods
+    pub fn open_add_youtube(&mut self) {
+        if self.is_youtube_fetching() {
+            self.status_message = Some("Already fetching a channel...".to_string());
+            return;
+        }
+        self.youtube_channel_url.clear();
+        self.ui_mode = UiMode::AddYouTubeChannel;
+    }
+
+    pub fn close_add_youtube(&mut self) {
+        self.youtube_channel_url.clear();
+        self.youtube_fetch_rx = None;
+        self.ui_mode = UiMode::Normal;
+    }
+
+    pub fn youtube_input(&mut self, c: char) {
+        self.youtube_channel_url.push(c);
+    }
+
+    pub fn youtube_backspace(&mut self) {
+        self.youtube_channel_url.pop();
+    }
+
+    pub fn youtube_submit(&mut self) {
+        let url = self.youtube_channel_url.trim().to_string();
+        if url.is_empty() {
+            self.status_message = Some("URL cannot be empty".to_string());
+            return;
+        }
+
+        self.status_message = Some("Fetching channel info".to_string());
+        self.ui_mode = UiMode::Normal;
+        self.youtube_fetch_tick = 0;
+
+        let (tx, rx) = mpsc::channel();
+        self.youtube_fetch_rx = Some(rx);
+
+        std::thread::spawn(move || {
+            let result = fetch_channel_info(&url, |_| {});
+            let msg = match result {
+                Ok((channel, videos)) => YouTubeFetchResult::Success(channel, videos),
+                Err(e) => YouTubeFetchResult::Error(e),
+            };
+            let _ = tx.send(msg);
+        });
+    }
+
+    pub fn check_youtube_fetch(&mut self) {
+        let result = if let Some(ref rx) = self.youtube_fetch_rx {
+            match rx.try_recv() {
+                Ok(r) => Some(r),
+                Err(mpsc::TryRecvError::Empty) => {
+                    let dots = ".".repeat((self.youtube_fetch_tick % 4) as usize);
+                    self.status_message = Some(format!("Fetching channel info{}", dots));
+                    self.youtube_fetch_tick = self.youtube_fetch_tick.wrapping_add(1);
+                    None
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.youtube_fetch_rx = None;
+                    self.status_message = Some("Fetch failed: connection lost".to_string());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        if let Some(result) = result {
+            self.youtube_fetch_rx = None;
+            match result {
+                YouTubeFetchResult::Success(channel, videos) => {
+                    match add_youtube_channel(
+                        &channel.channel_id,
+                        &channel.name,
+                        channel.handle.as_deref(),
+                        &channel.url,
+                        channel.thumbnail_url.as_deref(),
+                    ) {
+                        Ok(db_channel_id) => {
+                            let video_tuples: Vec<_> = videos
+                                .iter()
+                                .map(|v| {
+                                    (
+                                        v.video_id.clone(),
+                                        v.title.clone(),
+                                        v.duration_seconds,
+                                        v.thumbnail_url.clone(),
+                                        v.published_at,
+                                    )
+                                })
+                                .collect();
+                            let _ = add_youtube_videos(db_channel_id, &video_tuples);
+                            self.channels = get_youtube_channels().unwrap_or_default();
+                            self.status_message = Some(format!(
+                                "Added channel '{}' with {} videos",
+                                channel.name, videos.len()
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Failed to add channel: {}", e));
+                        }
+                    }
+                }
+                YouTubeFetchResult::Error(e) => {
+                    self.status_message = Some(format!("Failed to fetch channel: {}", e));
+                }
+            }
+        }
     }
 }
 

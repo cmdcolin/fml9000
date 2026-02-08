@@ -36,8 +36,8 @@ fn default_fetch_limit() -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RepeatMode {
-  #[default]
   Off,
+  #[default]
   All,
   One,
 }
@@ -69,7 +69,7 @@ impl Default for CoreSettings {
       youtube_audio_only: true,
       youtube_fetch_limit: 100,
       shuffle_enabled: false,
-      repeat_mode: RepeatMode::Off,
+      repeat_mode: RepeatMode::All,
     }
   }
 }
@@ -109,6 +109,74 @@ pub fn read_settings<T: Default + for<'de> Deserialize<'de>>() -> T {
     }),
     Err(_) => T::default(),
   }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppState {
+  #[serde(default)]
+  pub playing_track: Option<String>,
+  #[serde(default)]
+  pub playing_video_id: Option<String>,
+  #[serde(default)]
+  pub playback_position_secs: f64,
+  #[serde(default = "default_nav_section")]
+  pub nav_section: String,
+  #[serde(default)]
+  pub playlist_id: Option<i32>,
+  #[serde(default)]
+  pub channel_id: Option<i32>,
+  #[serde(default)]
+  pub nav_index: usize,
+  #[serde(default)]
+  pub track_index: usize,
+  #[serde(default)]
+  pub scroll_offset: usize,
+  #[serde(default = "default_section_expanded")]
+  pub section_expanded: [bool; 3],
+  #[serde(default)]
+  pub active_panel: String,
+}
+
+fn default_nav_section() -> String {
+  "all_media".to_string()
+}
+
+fn default_section_expanded() -> [bool; 3] {
+  [true, true, true]
+}
+
+pub fn read_state() -> AppState {
+  let Some(proj_dirs) = get_project_dirs() else {
+    return AppState::default();
+  };
+
+  let path = proj_dirs.config_dir().join("state.toml");
+
+  match std::fs::read_to_string(&path) {
+    Ok(contents) => toml::from_str(&contents).unwrap_or_else(|e| {
+      eprintln!("Warning: Failed to parse state file: {e}, using defaults");
+      AppState::default()
+    }),
+    Err(_) => AppState::default(),
+  }
+}
+
+pub fn write_state(state: &AppState) -> Result<(), String> {
+  let proj_dirs = get_project_dirs().ok_or("Could not determine config directory")?;
+  let path = proj_dirs.config_dir();
+
+  std::fs::create_dir_all(path).map_err(|e| format!("Failed to create config directory: {e}"))?;
+
+  let toml = toml::to_string(state).map_err(|e| format!("Failed to serialize state: {e}"))?;
+
+  let mut f = std::fs::OpenOptions::new()
+    .create(true)
+    .truncate(true)
+    .write(true)
+    .open(path.join("state.toml"))
+    .map_err(|e| format!("Failed to open state file: {e}"))?;
+
+  write!(f, "{}", toml).map_err(|e| format!("Failed to write state file: {e}"))
 }
 
 pub fn write_settings<T: Serialize>(settings: &T) -> Result<(), String> {

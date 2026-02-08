@@ -17,6 +17,7 @@ use gtk::{
 };
 use std::cell::{Cell, RefCell};
 use std::path::Path;
+use std::process::Command;
 use std::rc::Rc;
 
 pub type CurrentPlaylistId = Rc<RefCell<Option<i32>>>;
@@ -24,25 +25,7 @@ pub type IsViewingPlaybackQueue = Rc<Cell<bool>>;
 
 fn open_folder_in_explorer(file_path: &str) {
   if let Some(parent) = Path::new(file_path).parent() {
-    let folder = parent.to_string_lossy();
-    #[cfg(target_os = "linux")]
-    {
-      let _ = std::process::Command::new("xdg-open")
-        .arg(folder.as_ref())
-        .spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-      let _ = std::process::Command::new("open")
-        .arg(folder.as_ref())
-        .spawn();
-    }
-    #[cfg(target_os = "windows")]
-    {
-      let _ = std::process::Command::new("explorer")
-        .arg(folder.as_ref())
-        .spawn();
-    }
+    let _ = open::that(parent);
   }
 }
 
@@ -524,6 +507,7 @@ pub fn create_playlist_view(
   video_menu.append(Some("Play (Audio)"), Some("playlist.play-audio"));
   video_menu.append(Some("Play (Video)"), Some("playlist.play-video"));
   video_menu.append(Some("Play Next"), Some("playlist.queue-video"));
+  video_menu.append(Some("Play in mpv"), Some("playlist.play-in-mpv"));
   video_menu.append(Some("Open in Browser"), Some("playlist.open-browser"));
   video_menu.append(Some("Remove from Playlist"), Some("playlist.remove-video"));
   video_menu.append(Some("Remove from Queue"), Some("playlist.remove-video-from-queue"));
@@ -534,6 +518,7 @@ pub fn create_playlist_view(
 
   let track_menu = gtk::gio::Menu::new();
   track_menu.append(Some("Play Next"), Some("playlist.queue-track"));
+  track_menu.append(Some("Play in mpv"), Some("playlist.play-in-mpv"));
   track_menu.append(Some("Open Folder"), Some("playlist.open-folder"));
   track_menu.append(Some("Remove from Playlist"), Some("playlist.remove-track"));
   track_menu.append(Some("Remove from Queue"), Some("playlist.remove-track-from-queue"));
@@ -574,6 +559,19 @@ pub fn create_playlist_view(
     }
   });
   action_group.add_action(&open_browser);
+
+  let ci = current_item.clone();
+  let play_in_mpv = gtk::gio::SimpleAction::new("play-in-mpv", None);
+  play_in_mpv.connect_activate(move |_, _| {
+    if let Some(item) = ci.borrow().as_ref() {
+      let url = match item {
+        MediaItem::Track(track) => track.filename.clone(),
+        MediaItem::Video(video) => format!("https://www.youtube.com/watch?v={}", video.video_id),
+      };
+      let _ = Command::new("mpv").arg(&url).spawn();
+    }
+  });
+  action_group.add_action(&play_in_mpv);
 
   let ci = current_item.clone();
   let open_folder = gtk::gio::SimpleAction::new("open-folder", None);
