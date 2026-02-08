@@ -14,7 +14,7 @@ use gtk::prelude::*;
 use gtk::{AlertDialog, ApplicationWindow, Picture, Stack};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
-use rand::Rng;
+use rand::RngExt;
 use rodio::source::Source;
 use rodio::Decoder;
 use std::cell::{Cell, RefCell};

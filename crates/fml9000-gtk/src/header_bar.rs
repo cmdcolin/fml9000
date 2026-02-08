@@ -269,7 +269,6 @@ pub fn create_header_bar(
     }
   });
 
-  button_box.append(&settings_btn);
   button_box.append(&time_current);
   button_box.append(&time_separator);
   button_box.append(&time_total);
@@ -282,6 +281,7 @@ pub fn create_header_bar(
   button_box.append(&shuffle_btn);
   button_box.append(&repeat_btn);
   button_box.append(&volume_button);
+  button_box.append(&settings_btn);
 
   pause_btn.connect_clicked(move |_| {
     match pc_for_pause.playback_source() {

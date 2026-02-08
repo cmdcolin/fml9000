@@ -1,5 +1,4 @@
 use crate::grid_cell::Entry;
-use crate::gtk_helpers::{get_cell, setup_col};
 use crate::new_playlist_dialog;
 use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
@@ -14,7 +13,7 @@ use gtk::gdk;
 use gtk::gio::ListStore;
 use gtk::glib;
 use gtk::glib::BoxedAnyObject;
-use gtk::{ColumnView, ColumnViewColumn, DropTarget, GestureClick, PopoverMenu, ScrolledWindow, SignalListItemFactory, SingleSelection};
+use gtk::{ColumnView, ColumnViewColumn, DropTarget, GestureClick, PopoverMenu, ScrolledWindow, SignalListItemFactory, SingleSelection, TreeExpander, TreeListModel, TreeListRow};
 use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 
@@ -32,6 +31,70 @@ struct Playlist {
   playlist_type: PlaylistType,
 }
 
+#[derive(Clone)]
+enum SectionKind {
+  AutoPlaylists,
+  UserPlaylists,
+  YouTubeChannels,
+}
+
+enum PlaylistEntry {
+  SectionHeader(String, SectionKind),
+  Playlist(Playlist),
+}
+
+fn build_children_store(kind: &SectionKind) -> ListStore {
+  let store = ListStore::new::<BoxedAnyObject>();
+  match kind {
+    SectionKind::AutoPlaylists => {
+      store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+        name: "Recently added".to_string(),
+        playlist_type: PlaylistType::RecentlyAdded,
+      })));
+      store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+        name: "Recently played".to_string(),
+        playlist_type: PlaylistType::RecentlyPlayed,
+      })));
+      store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+        name: "Playback queue".to_string(),
+        playlist_type: PlaylistType::PlaybackQueue,
+      })));
+    }
+    SectionKind::UserPlaylists => {
+      if let Ok(user_playlists) = get_user_playlists() {
+        for playlist in user_playlists {
+          store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+            name: playlist.name.clone(),
+            playlist_type: PlaylistType::UserPlaylist(playlist.id, playlist.name.clone()),
+          })));
+        }
+      }
+    }
+    SectionKind::YouTubeChannels => {
+      if let Ok(channels) = get_youtube_channels() {
+        for channel in channels {
+          store.append(&BoxedAnyObject::new(PlaylistEntry::Playlist(Playlist {
+            name: channel.name.clone(),
+            playlist_type: PlaylistType::YouTubeChannel(channel.id, channel.name.clone()),
+          })));
+        }
+      }
+    }
+  }
+  store
+}
+
+fn get_playlist_from_tree_row(row: &TreeListRow) -> Option<BoxedAnyObject> {
+  let obj = row.item()?.downcast::<BoxedAnyObject>().ok()?;
+  {
+    let entry: Ref<PlaylistEntry> = obj.borrow();
+    if matches!(&*entry, PlaylistEntry::SectionHeader(_, _)) {
+      return None;
+    }
+  }
+  Some(obj)
+}
+
 pub fn create_playlist_manager(
   playlist_mgr_store: &ListStore,
   main_playlist_store: ListStore,
@@ -40,8 +103,19 @@ pub fn create_playlist_manager(
   current_playlist_id: Rc<RefCell<Option<i32>>>,
   is_viewing_playback_queue: Rc<Cell<bool>>,
 ) -> (gtk::Box, SingleSelection) {
+  populate_playlist_store(playlist_mgr_store);
+
+  let tree_model = TreeListModel::new(playlist_mgr_store.clone(), false, true, |item| {
+    let obj = item.downcast_ref::<BoxedAnyObject>()?;
+    let entry: Ref<PlaylistEntry> = obj.borrow();
+    match &*entry {
+      PlaylistEntry::SectionHeader(_, kind) => Some(build_children_store(kind).into()),
+      PlaylistEntry::Playlist(_) => None,
+    }
+  });
+
   let selection = SingleSelection::builder()
-    .model(playlist_mgr_store)
+    .model(&tree_model)
     .autoselect(false)
     .build();
   let columnview = ColumnView::builder().model(&selection).build();
@@ -52,113 +126,149 @@ pub fn create_playlist_manager(
   let selection_for_setup = selection.clone();
   let main_store_for_setup = main_playlist_store.clone();
   let current_playlist_id_for_setup = current_playlist_id.clone();
+  let tree_model_for_setup = tree_model.clone();
   factory.connect_setup(move |_factory, item| {
-    setup_col(item);
-
     let list_item = item.downcast_ref::<gtk::ListItem>().unwrap();
-    if let Some(child) = list_item.child() {
-      let drop_target = DropTarget::new(glib::Type::STRING, gdk::DragAction::COPY);
+    let cell = crate::grid_cell::GridCell::new();
+    let expander = TreeExpander::new();
+    expander.set_child(Some(&cell));
+    list_item.set_child(Some(&expander));
 
-      let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+    let drop_target = DropTarget::new(glib::Type::STRING, gdk::DragAction::COPY);
 
-      let pc = playback_controller_for_setup.clone();
-      let store = playlist_mgr_store_for_setup.clone();
-      let pid = current_playlist_id.clone();
-      let pid_for_enter = current_playlist_id.clone();
-      let child_for_enter = child.clone();
-      drop_target.connect_enter(move |_target, _x, _y| {
-        if pid_for_enter.borrow().is_some() {
-          child_for_enter.add_css_class("drop-target-hover");
+    let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+
+    let pc = playback_controller_for_setup.clone();
+    let store = playlist_mgr_store_for_setup.clone();
+    let pid = current_playlist_id.clone();
+    let pid_for_enter = current_playlist_id.clone();
+    let expander_for_enter = expander.clone();
+    drop_target.connect_enter(move |_target, _x, _y| {
+      if pid_for_enter.borrow().is_some() {
+        if let Some(child) = expander_for_enter.child() {
+          child.add_css_class("drop-target-hover");
         }
-        gdk::DragAction::COPY
-      });
+      }
+      gdk::DragAction::COPY
+    });
 
-      let child_for_leave = child.clone();
-      drop_target.connect_leave(move |_target| {
-        child_for_leave.remove_css_class("drop-target-hover");
-      });
+    let expander_for_leave = expander.clone();
+    drop_target.connect_leave(move |_target| {
+      if let Some(child) = expander_for_leave.child() {
+        child.remove_css_class("drop-target-hover");
+      }
+    });
 
-      let child_for_drop = child.clone();
-      let sel = selection_for_setup.clone();
-      let store_for_select = playlist_mgr_store_for_setup.clone();
-      let main_store_for_drop = main_store_for_setup.clone();
-      let current_pid_for_drop = current_playlist_id_for_setup.clone();
-      drop_target.connect_drop(move |_target, value, _x, _y| {
-        child_for_drop.remove_css_class("drop-target-hover");
+    let expander_for_drop = expander.clone();
+    let sel = selection_for_setup.clone();
+    let main_store_for_drop = main_store_for_setup.clone();
+    let current_pid_for_drop = current_playlist_id_for_setup.clone();
+    let tree_model_for_drop = tree_model_for_setup.clone();
+    drop_target.connect_drop(move |_target, value, _x, _y| {
+      if let Some(child) = expander_for_drop.child() {
+        child.remove_css_class("drop-target-hover");
+      }
 
-        let Ok(data) = value.get::<String>() else {
-          return false;
-        };
+      let Ok(data) = value.get::<String>() else {
+        return false;
+      };
 
-        if let Some(playlist_id) = *pid.borrow() {
-          let result = handle_drop_on_playlist(playlist_id, &data);
-          if result {
-            for i in 0..store_for_select.n_items() {
-              if let Some(item) = store_for_select.item(i) {
-                let obj = item.downcast::<BoxedAnyObject>().unwrap();
-                let playlist: Ref<Playlist> = obj.borrow();
-                if let PlaylistType::UserPlaylist(id, _) = &playlist.playlist_type {
-                  if *id == playlist_id {
-                    sel.set_selected(i);
-                    *current_pid_for_drop.borrow_mut() = Some(playlist_id);
-                    main_store_for_drop.remove_all();
-                    if let Ok(items) = get_playlist_items(playlist_id) {
-                      load_media_items(&items, &main_store_for_drop);
+      if let Some(playlist_id) = *pid.borrow() {
+        let result = handle_drop_on_playlist(playlist_id, &data);
+        if result {
+          for i in 0..tree_model_for_drop.n_items() {
+            if let Some(item) = tree_model_for_drop.item(i) {
+              if let Some(row) = item.downcast_ref::<TreeListRow>() {
+                if let Some(obj) = row.item() {
+                  if let Some(obj) = obj.downcast_ref::<BoxedAnyObject>() {
+                    let entry: Ref<PlaylistEntry> = obj.borrow();
+                    if let PlaylistEntry::Playlist(playlist) = &*entry {
+                      if let PlaylistType::UserPlaylist(id, _) = &playlist.playlist_type {
+                        if *id == playlist_id {
+                          sel.set_selected(i);
+                          *current_pid_for_drop.borrow_mut() = Some(playlist_id);
+                          main_store_for_drop.remove_all();
+                          if let Ok(items) = get_playlist_items(playlist_id) {
+                            load_media_items(&items, &main_store_for_drop);
+                          }
+                          break;
+                        }
+                      }
                     }
-                    break;
                   }
                 }
               }
             }
           }
-          return result;
         }
-
-        let store_clone = store.clone();
-        let data_clone = data.clone();
-        new_playlist_dialog::show_dialog(
-          pc.clone(),
-          data.clone(),
-          move |playlist_id| {
-            let _ = handle_drop_on_playlist(playlist_id, &data_clone);
-            store_clone.remove_all();
-            populate_playlist_store(&store_clone);
-          },
-        );
-        true
-      });
-
-      child.add_controller(drop_target);
-
-      if let Some(cell) = child.downcast_ref::<crate::grid_cell::GridCell>() {
-        cell.set_playlist_id(current_playlist_id);
+        return result;
       }
+
+      let store_clone = store.clone();
+      let data_clone = data.clone();
+      new_playlist_dialog::show_dialog(
+        pc.clone(),
+        data.clone(),
+        move |playlist_id| {
+          let _ = handle_drop_on_playlist(playlist_id, &data_clone);
+          store_clone.remove_all();
+          populate_playlist_store(&store_clone);
+        },
+      );
+      true
+    });
+
+    expander.add_controller(drop_target);
+
+    if let Some(cell) = expander.child().and_then(|c| c.downcast::<crate::grid_cell::GridCell>().ok()) {
+      cell.set_playlist_id(current_playlist_id);
     }
   });
 
   let settings_for_bind = settings.clone();
   factory.connect_bind(move |_factory, item| {
-    let (cell, obj) = get_cell(item);
+    let list_item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let expander = list_item.child().unwrap().downcast::<TreeExpander>().unwrap();
+    let row = list_item.item().unwrap().downcast::<TreeListRow>().unwrap();
+    expander.set_list_row(Some(&row));
+
+    let cell = expander.child().unwrap().downcast::<crate::grid_cell::GridCell>().unwrap();
     let row_height = settings_for_bind.borrow().row_height;
     cell.set_row_height(row_height.height_pixels(), row_height.is_compact());
-    let playlist: Ref<Playlist> = obj.borrow();
 
-    if let PlaylistType::UserPlaylist(id, _) = &playlist.playlist_type {
-      cell.set_entry(&Entry {
-        name: format!("♪ {}", playlist.name),
-      });
-      cell.add_css_class("user-playlist");
-      cell.set_playlist_id_value(Some(*id));
-    } else {
-      cell.set_entry(&Entry {
-        name: playlist.name.clone(),
-      });
-      cell.remove_css_class("user-playlist");
-      cell.set_playlist_id_value(None);
+    let obj = row.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
+    let entry: Ref<PlaylistEntry> = obj.borrow();
+    match &*entry {
+      PlaylistEntry::SectionHeader(name, _) => {
+        cell.set_entry(&Entry { name: name.clone() });
+        cell.add_css_class("section-header");
+        cell.remove_css_class("user-playlist");
+        cell.set_playlist_id_value(None);
+      }
+      PlaylistEntry::Playlist(playlist) => {
+        cell.remove_css_class("section-header");
+        if let PlaylistType::UserPlaylist(id, _) = &playlist.playlist_type {
+          cell.set_entry(&Entry {
+            name: playlist.name.clone(),
+          });
+          cell.add_css_class("user-playlist");
+          cell.set_playlist_id_value(Some(*id));
+        } else {
+          cell.set_entry(&Entry {
+            name: playlist.name.clone(),
+          });
+          cell.remove_css_class("user-playlist");
+          cell.set_playlist_id_value(None);
+        }
+      }
     }
   });
 
-  populate_playlist_store(playlist_mgr_store);
+  factory.connect_unbind(move |_factory, item| {
+    let list_item = item.downcast_ref::<gtk::ListItem>().unwrap();
+    let expander = list_item.child().unwrap().downcast::<TreeExpander>().unwrap();
+    expander.set_list_row(None::<&TreeListRow>);
+  });
 
   let column = ColumnViewColumn::builder()
     .title("Playlists")
@@ -175,8 +285,14 @@ pub fn create_playlist_manager(
   let main_playlist_store_for_callback = main_playlist_store.clone();
   selection.connect_selection_changed(move |sel, _, _| {
     if let Some(item) = sel.selected_item() {
-      let obj = item.downcast::<BoxedAnyObject>().unwrap();
-      let playlist: Ref<Playlist> = obj.borrow();
+      let row = item.downcast::<TreeListRow>().unwrap();
+      let Some(obj) = get_playlist_from_tree_row(&row) else {
+        return;
+      };
+      let entry: Ref<PlaylistEntry> = obj.borrow();
+      let PlaylistEntry::Playlist(playlist) = &*entry else {
+        return;
+      };
 
       main_playlist_store_clone.remove_all();
 
@@ -275,27 +391,17 @@ pub fn create_playlist_manager(
   let cp = current_playlist.clone();
   let popover = playlist_popover.clone();
   let sel_for_gesture = selection.clone();
-  let store_for_gesture = playlist_mgr_store.clone();
   gesture.connect_pressed(move |gesture, _n_press, x, y| {
     let mut found_playlist: Option<(i32, String)> = None;
 
-    if let Some(selected_item) = sel_for_gesture.selected_item() {
-      let obj = selected_item.downcast::<BoxedAnyObject>().unwrap();
-      let playlist: Ref<Playlist> = obj.borrow();
-      if let PlaylistType::UserPlaylist(id, name) = &playlist.playlist_type {
-        found_playlist = Some((*id, name.clone()));
-      }
-    }
-
-    if found_playlist.is_none() {
-      for i in 0..store_for_gesture.n_items() {
-        if let Some(item) = store_for_gesture.item(i) {
-          let obj = item.downcast::<BoxedAnyObject>().unwrap();
-          let playlist: Ref<Playlist> = obj.borrow();
-          if let PlaylistType::UserPlaylist(id, name) = &playlist.playlist_type {
-            found_playlist = Some((*id, name.clone()));
-            sel_for_gesture.set_selected(i);
-            break;
+    if let Some(item) = sel_for_gesture.selected_item() {
+      if let Ok(row) = item.downcast::<TreeListRow>() {
+        if let Some(obj) = get_playlist_from_tree_row(&row) {
+          let entry: Ref<PlaylistEntry> = obj.borrow();
+          if let PlaylistEntry::Playlist(playlist) = &*entry {
+            if let PlaylistType::UserPlaylist(id, name) = &playlist.playlist_type {
+              found_playlist = Some((*id, name.clone()));
+            }
           }
         }
       }
@@ -349,37 +455,19 @@ pub fn create_playlist_manager(
   (container, selection)
 }
 
-fn populate_playlist_store(store: &ListStore) {
-  store.append(&BoxedAnyObject::new(Playlist {
-    name: "Recently added".to_string(),
-    playlist_type: PlaylistType::RecentlyAdded,
-  }));
-  store.append(&BoxedAnyObject::new(Playlist {
-    name: "Recently played".to_string(),
-    playlist_type: PlaylistType::RecentlyPlayed,
-  }));
-  store.append(&BoxedAnyObject::new(Playlist {
-    name: "Playback queue".to_string(),
-    playlist_type: PlaylistType::PlaybackQueue,
-  }));
-
-  if let Ok(user_playlists) = get_user_playlists() {
-    for playlist in user_playlists {
-      store.append(&BoxedAnyObject::new(Playlist {
-        name: playlist.name.clone(),
-        playlist_type: PlaylistType::UserPlaylist(playlist.id, playlist.name.clone()),
-      }));
-    }
-  }
-
-  if let Ok(channels) = get_youtube_channels() {
-    for channel in channels {
-      store.append(&BoxedAnyObject::new(Playlist {
-        name: format!("YT: {}", channel.name),
-        playlist_type: PlaylistType::YouTubeChannel(channel.id, channel.name.clone()),
-      }));
-    }
-  }
+pub fn populate_playlist_store(store: &ListStore) {
+  store.append(&BoxedAnyObject::new(PlaylistEntry::SectionHeader(
+    "Auto Playlists".to_string(),
+    SectionKind::AutoPlaylists,
+  )));
+  store.append(&BoxedAnyObject::new(PlaylistEntry::SectionHeader(
+    "Playlists".to_string(),
+    SectionKind::UserPlaylists,
+  )));
+  store.append(&BoxedAnyObject::new(PlaylistEntry::SectionHeader(
+    "YouTube Channels".to_string(),
+    SectionKind::YouTubeChannels,
+  )));
 }
 
 fn load_media_items(items: &[MediaItem], store: &ListStore) {

@@ -80,6 +80,7 @@ pub fn get_playlist_id_for_handle(handle: &str) -> Result<String, String> {
 pub fn fetch_new_videos(
   playlist_id: &str,
   existing_video_ids: &HashSet<String>,
+  fetch_all: bool,
   on_progress: impl Fn(usize, i32),
 ) -> Result<Vec<ApiVideoInfo>, String> {
   let mut all_videos = Vec::new();
@@ -108,6 +109,9 @@ pub fn fetch_new_videos(
       let video_id = item.snippet.resource_id.video_id;
 
       if existing_video_ids.contains(&video_id) {
+        if fetch_all {
+          continue;
+        }
         found_existing = true;
         break;
       }

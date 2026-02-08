@@ -177,9 +177,9 @@ pub fn run_scan_with_progress(
               filename: &path_str,
               artist: t.artist().as_deref(),
               album: t.album().as_deref(),
-              album_artist: t.get_string(&ItemKey::AlbumArtist),
+              album_artist: t.get_string(ItemKey::AlbumArtist),
               title: t.title().as_deref(),
-              track: t.get_string(&ItemKey::TrackNumber),
+              track: t.get_string(ItemKey::TrackNumber),
               genre: t.genre().as_deref(),
               duration_seconds,
             })
@@ -615,6 +615,16 @@ pub fn update_channel_last_fetched(id: i32) -> Result<(), String> {
     .map_err(|e| format!("Failed to update last_fetched: {e}"))?;
 
   Ok(())
+}
+
+pub fn get_video_count_for_channel(db_channel_id: i32) -> Result<i64, String> {
+  let mut conn = connect_db()?;
+
+  youtube_videos::table
+    .filter(youtube_videos::channel_id.eq(db_channel_id))
+    .count()
+    .get_result::<i64>(&mut conn)
+    .map_err(|e| format!("Failed to count videos: {e}"))
 }
 
 pub fn get_video_ids_for_channel(db_channel_id: i32) -> Result<std::collections::HashSet<String>, String> {
