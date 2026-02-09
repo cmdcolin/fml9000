@@ -143,6 +143,8 @@ fn app_main(application: &Application) {
     settings.borrow().repeat_mode,
   );
 
+  playback_controller.set_vaporwave_enabled(settings.borrow().vaporwave_enabled);
+
   let current_playlist_id: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
   let is_viewing_playback_queue: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
