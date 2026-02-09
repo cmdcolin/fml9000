@@ -211,6 +211,7 @@ fn handle_event(app: &mut App, event: &Event, size: Size) -> io::Result<bool> {
                 KeyCode::Char('3') => app.select_nav_leaf(2),
                 KeyCode::Char('4') => app.select_nav_leaf(3),
                 KeyCode::Char('5') => app.select_nav_leaf(4),
+                KeyCode::Char('6') => app.select_nav_leaf(5),
                 KeyCode::Char('y') => app.open_add_youtube(),
                 _ => {}
             }

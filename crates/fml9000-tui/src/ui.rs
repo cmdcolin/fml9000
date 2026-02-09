@@ -626,7 +626,7 @@ fn render_help(f: &mut Frame) {
         "  Enter         Play / Select",
         "  /             Search",
         "  Esc           Cancel / Close",
-        "  1-5           Quick nav sections",
+        "  1-6           Quick nav sections",
         "",
         "  Playback",
         "  ──────────────────────────────",
