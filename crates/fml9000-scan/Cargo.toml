@@ -1,0 +1,12 @@
+[package]
+name = "fml9000-scan"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fml9000-scan"
+path = "src/main.rs"
+
+[dependencies]
+fml9000-core = { path = "../fml9000-core" }

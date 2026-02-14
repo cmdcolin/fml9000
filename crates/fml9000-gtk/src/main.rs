@@ -16,8 +16,9 @@ mod youtube_add_dialog;
 use adw::prelude::*;
 use adw::Application;
 use facet_box::{create_facet_box, load_facet_store, load_playlist_store};
-use fml9000_core::{init_db, load_tracks, run_scan_with_progress, AudioPlayer};
+use fml9000_core::{init_db, load_tracks, run_scan_with_progress, delete_tracks_by_filename, AudioPlayer, ScanProgress};
 use gtk::gio::ListStore;
+use gtk::glib;
 use gtk::glib::BoxedAnyObject;
 use gtk::gdk::Key;
 use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Label, Notebook, Orientation, Paned, Picture, Stack};
@@ -97,15 +98,6 @@ fn app_main(application: &Application) {
     }
   };
 
-  if settings.borrow().rescan_on_startup {
-    let folders = settings.borrow().folders.clone();
-    let existing_files: std::collections::HashSet<String> = tracks.iter().map(|t| t.filename.clone()).collect();
-    std::thread::spawn(move || {
-      let (tx, _rx) = std::sync::mpsc::channel();
-      run_scan_with_progress(folders, existing_files, std::collections::HashSet::new(), tx);
-    });
-  }
-
   let filter = CustomFilter::new(|_| true);
   let playlist_store = ListStore::new::<BoxedAnyObject>();
   let playlist_mgr_store = ListStore::new::<BoxedAnyObject>();
@@ -131,6 +123,92 @@ fn app_main(application: &Application) {
 
   load_playlist_store(tracks.iter(), &playlist_store);
   load_facet_store(&tracks, &facet_store);
+
+  if settings.borrow().rescan_on_startup {
+    let folders = settings.borrow().folders.clone();
+    let mut existing_complete: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut existing_incomplete: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for track in tracks.iter() {
+      if track.duration_seconds.is_some() {
+        existing_complete.insert(track.filename.clone());
+      } else {
+        existing_incomplete.insert(track.filename.clone());
+      }
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+      run_scan_with_progress(folders, existing_complete, existing_incomplete, tx);
+    });
+
+    let playlist_store_for_scan = playlist_store.clone();
+    let facet_store_for_scan = facet_store.clone();
+    let window_for_scan = Rc::clone(&window);
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+      while let Ok(progress) = rx.try_recv() {
+        if let ScanProgress::Complete(_found, _skipped, added, updated, stale_files) = progress {
+          if added > 0 || updated > 0 {
+            if let Ok(fresh_tracks) = load_tracks() {
+              playlist_store_for_scan.remove_all();
+              load_playlist_store(fresh_tracks.iter(), &playlist_store_for_scan);
+              facet_store_for_scan.remove_all();
+              load_facet_store(&fresh_tracks, &facet_store_for_scan);
+            }
+          }
+
+          if !stale_files.is_empty() {
+            let stale_count = stale_files.len();
+            let preview: String = stale_files.iter().take(10)
+              .map(|f| {
+                std::path::Path::new(f)
+                  .file_name()
+                  .map(|n| n.to_string_lossy().to_string())
+                  .unwrap_or_else(|| f.clone())
+              })
+              .collect::<Vec<_>>()
+              .join("\n");
+            let detail = if stale_count > 10 {
+              format!("{preview}\n...and {} more", stale_count - 10)
+            } else {
+              preview
+            };
+
+            let confirm = gtk::AlertDialog::builder()
+              .modal(true)
+              .message(&format!("{stale_count} tracks no longer found on disk. Remove from library?"))
+              .detail(&detail)
+              .buttons(["Cancel", "Remove"])
+              .default_button(0)
+              .cancel_button(0)
+              .build();
+
+            let ps = playlist_store_for_scan.clone();
+            let fs = facet_store_for_scan.clone();
+            confirm.choose(
+              Some(&*window_for_scan),
+              None::<&gtk::gio::Cancellable>,
+              move |result| {
+                if result == Ok(1) {
+                  if let Err(e) = delete_tracks_by_filename(&stale_files) {
+                    eprintln!("Warning: Failed to remove stale tracks: {e}");
+                  }
+                  if let Ok(fresh_tracks) = load_tracks() {
+                    ps.remove_all();
+                    load_playlist_store(fresh_tracks.iter(), &ps);
+                    fs.remove_all();
+                    load_facet_store(&fresh_tracks, &fs);
+                  }
+                }
+              },
+            );
+          }
+
+          return glib::ControlFlow::Break;
+        }
+      }
+      glib::ControlFlow::Continue
+    });
+  }
 
   let playback_controller = PlaybackController::new(
     audio.clone(),

@@ -852,6 +852,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fml9000-scan"
+version = "0.1.0"
+dependencies = [
+ "fml9000-core",
+]
+
+[[package]]
 name = "fml9000-tui"
 version = "0.1.0"
 dependencies = [

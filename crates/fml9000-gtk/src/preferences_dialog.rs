@@ -7,7 +7,7 @@ use fml9000_core::youtube_api;
 use adw::prelude::*;
 use fml9000_core::Track;
 use fml9000_core::{
-  add_youtube_videos, delete_youtube_channel, get_video_count_for_channel,
+  add_youtube_videos, delete_tracks_by_filename, delete_youtube_channel, get_video_count_for_channel,
   get_video_ids_for_channel, get_youtube_channels,
   load_tracks, run_scan_with_progress, update_channel_last_fetched, ScanProgress,
 };
@@ -414,7 +414,7 @@ pub async fn dialog(
               file_label_clone.set_label(&name.to_string_lossy());
             }
           }
-          ScanProgress::Complete(found, skipped, added, updated) => {
+          ScanProgress::Complete(found, skipped, added, updated, stale_files) => {
             if updated > 0 {
               status_label_clone.set_label(&format!(
                 "Complete: {} found, {} existing, {} added, {} updated",
@@ -430,19 +430,71 @@ pub async fn dialog(
             progress_bar_clone.set_text(Some("Complete"));
             file_label_clone.set_label("");
 
-            if let Ok(fresh_tracks) = load_tracks() {
-              playlist_store_clone.remove_all();
-              load_playlist_store(fresh_tracks.iter(), &playlist_store_clone);
-              facet_store_clone.remove_all();
-              load_facet_store(&fresh_tracks, &facet_store_clone);
-            }
+            let playlist_store_final = playlist_store_clone.clone();
+            let facet_store_final = facet_store_clone.clone();
+            let reload_stores = move || {
+              if let Ok(fresh_tracks) = load_tracks() {
+                playlist_store_final.remove_all();
+                load_playlist_store(fresh_tracks.iter(), &playlist_store_final);
+                facet_store_final.remove_all();
+                load_facet_store(&fresh_tracks, &facet_store_final);
+              }
+            };
 
-            let dialog = dialog_clone.clone();
-            let btn = btn_clone.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_millis(2000), move || {
-              dialog.close();
-              btn.set_sensitive(true);
-            });
+            if !stale_files.is_empty() {
+              let stale_count = stale_files.len();
+              let preview: String = stale_files.iter().take(10)
+                .map(|f| {
+                  std::path::Path::new(f)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| f.clone())
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+              let detail = if stale_count > 10 {
+                format!("{preview}\n...and {} more", stale_count - 10)
+              } else {
+                preview
+              };
+
+              let confirm = gtk::AlertDialog::builder()
+                .modal(true)
+                .message(&format!("{stale_count} tracks no longer found on disk. Remove from library?"))
+                .detail(&detail)
+                .buttons(["Cancel", "Remove"])
+                .default_button(0)
+                .cancel_button(0)
+                .build();
+
+              let dialog_for_parent = dialog_clone.clone();
+              let dialog_for_close = dialog_clone.clone();
+              let btn_for_confirm = btn_clone.clone();
+              confirm.choose(
+                Some(&dialog_for_parent),
+                None::<&gio::Cancellable>,
+                move |result| {
+                  if result == Ok(1) {
+                    if let Err(e) = delete_tracks_by_filename(&stale_files) {
+                      eprintln!("Warning: Failed to remove stale tracks: {e}");
+                    }
+                  }
+                  reload_stores();
+                  glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || {
+                    dialog_for_close.close();
+                    btn_for_confirm.set_sensitive(true);
+                  });
+                },
+              );
+            } else {
+              reload_stores();
+              let dialog = dialog_clone.clone();
+              let btn = btn_clone.clone();
+              glib::timeout_add_local_once(std::time::Duration::from_millis(2000), move || {
+                dialog.close();
+                btn.set_sensitive(true);
+              });
+            }
 
             return glib::ControlFlow::Break;
           }
