@@ -36,8 +36,9 @@ TUI for the terminal, uses same database
 ```
 git clone https://github.com/cmdcolin/fml9000
 cd fml9000
-cargo run -p fml9000-tui  # terminal mode
-cargo run -p fml9000-gtk  # gui mode
+cargo run -p fml9000-scan  # command-line library scanner
+cargo run -p fml9000-tui   # terminal mode
+cargo run -p fml9000-gtk   # gui mode
 ```
 
 
@@ -83,6 +84,54 @@ cargo run -p fml9000-gtk  # gui mode
 
 The library database is stored as SQLite at `~/.config/fml9000/library.db`, so
 you can query it directly with `sqlite3`.
+
+### Library Scanner
+
+`fml9000-scan` is a standalone command-line tool for scanning your music library.
+
+**First-time setup** (no config yet):
+```bash
+cargo run -p fml9000-scan
+# Prompts you to enter music folder paths interactively
+#   Add folder: ~/Music
+#     Added: /home/user/Music
+#   Add folder: ~/Downloads/Albums
+#     Added: /home/user/Downloads/Albums
+#   Add folder:
+# Settings saved.
+```
+
+**Quick setup** (pass directories as arguments):
+```bash
+cargo run -p fml9000-scan ~/Music ~/Downloads/Albums
+# Added 2 folder(s) to config.
+# Scanning 2 folder(s)...
+```
+
+**Rescan** (if already configured):
+```bash
+cargo run -p fml9000-scan
+# Scanning 1 folder(s)...
+#   /home/user/Music
+# 1234 tracks already in library
+#
+# Scanning: /home/user/Music
+#   5678 files, 1234 existing, 42 new
+#
+# Scan complete:
+#   5678 files found
+#   1234 already up to date
+#   42 added
+#
+# 3 tracks no longer found on disk. Remove from library? [y/N]
+```
+
+Features:
+- Scans configured folders for audio files (mp3, flac, ogg, opus, wav, aac, m4a, etc.)
+- Detects and prompts before removing stale tracks (files deleted from disk)
+- Handles files without tags (adds with filename and duration only)
+- Shows live progress with file counts
+- Shares the same config and database as the GUI and TUI apps
 
 ### fzf + mpv browser
 
