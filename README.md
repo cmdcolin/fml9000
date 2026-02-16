@@ -175,4 +175,6 @@ mpv "https://youtube.com/watch?v=$(sqlite3 ~/.config/fml9000/library.db \
 
 Still a very alpha quality software work in progress
 
+This project started in 2022 pre-AI usage, but was revisited in 2026 using Claude Code
+
 
