@@ -191,6 +191,23 @@ pub async fn dialog(
   scan_group.add(&rescan_row);
   scan_group.add(&rescan_on_startup_row);
 
+  let vaporwave_switch = gtk::Switch::builder()
+    .active(settings.borrow().vaporwave_enabled)
+    .valign(gtk::Align::Center)
+    .build();
+
+  let vaporwave_row = adw::ActionRow::builder()
+    .title("Vaporwave Mode")
+    .subtitle("Slows audio to 66% speed for that retro aesthetic (requires ffmpeg)")
+    .build();
+  vaporwave_row.add_suffix(&vaporwave_switch);
+  vaporwave_row.set_activatable_widget(Some(&vaporwave_switch));
+
+  let audio_group = adw::PreferencesGroup::builder()
+    .title("Audio Effects")
+    .build();
+  audio_group.add(&vaporwave_row);
+
   let current_row_height = settings.borrow().row_height;
 
   let normal_radio = gtk::CheckButton::builder()
@@ -250,6 +267,7 @@ pub async fn dialog(
     .build();
   library_page.add(&library_group);
   library_page.add(&scan_group);
+  library_page.add(&audio_group);
 
   let appearance_page = adw::PreferencesPage::builder()
     .title("Appearance")
@@ -511,6 +529,18 @@ pub async fn dialog(
     if let Err(e) = write_settings(&s) {
       eprintln!("Warning: {e}");
     }
+  });
+
+  let settings_for_vaporwave = Rc::clone(&settings);
+  let pc_for_vaporwave = Rc::clone(&playback_controller);
+  vaporwave_switch.connect_active_notify(move |switch: &gtk::Switch| {
+    let enabled = switch.is_active();
+    let mut s = settings_for_vaporwave.borrow_mut();
+    s.vaporwave_enabled = enabled;
+    if let Err(e) = write_settings(&s) {
+      eprintln!("Warning: {e}");
+    }
+    pc_for_vaporwave.set_vaporwave_enabled(enabled);
   });
 
   let settings_for_normal = Rc::clone(&settings);

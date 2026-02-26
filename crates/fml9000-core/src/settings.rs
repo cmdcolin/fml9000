@@ -58,6 +58,8 @@ pub struct CoreSettings {
   pub shuffle_enabled: bool,
   #[serde(default)]
   pub repeat_mode: RepeatMode,
+  #[serde(default)]
+  pub vaporwave_enabled: bool,
 }
 
 impl Default for CoreSettings {
@@ -70,6 +72,7 @@ impl Default for CoreSettings {
       youtube_fetch_limit: 100,
       shuffle_enabled: false,
       repeat_mode: RepeatMode::All,
+      vaporwave_enabled: false,
     }
   }
 }
