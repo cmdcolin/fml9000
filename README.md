@@ -4,22 +4,17 @@ A music player written in Rust with GTK4-rs
 
 ## Features/concepts
 
-- Not MPD based (could be a good of bad thing, depending on your point of view)
 - Inspired by foobar2000
-- Implemented in gtk4-rs
+- GUI implemented using `gtk4-rs`
 - Plays youtube videos embedded in app
-- Play audio with rust `rodio` library
-- Add all videos from a youtube channel your library (motivated by https://cmdcolin.github.io/ytshuffle/)
-- Recently added auto playlist
-- Recently played auto playlist
-- Playback queue auto playlist
-- Show embededed art or folder art
-- Keep track metadata in sqlite database with diesel
-- Four 'quadrant' view
+- Show embededed art, folder art, or youtube thumbnail
+- Play audio with rust `rodio` library or `mpv` for youtube
+- Add all videos from a youtube channel your library
+- Recently added, recently played, and playback queue auto playlists
 - Optionally auto-scan one or more folders
-- Also has experimental TUI mode for the terminal, reads some diesal database and plays youtube videos with mpv,
-
-
+- Keeps track metadata in `sqlite` database with `diesel`
+- Not MPD based (could be good or bad depending on your point of view)
+- Includes ratatui and fzf TUI/CLI interfaces for the terminal
 
 
 ## Screenshot
@@ -177,4 +172,4 @@ Still a very alpha quality software work in progress
 
 This project started in 2022 pre-AI usage, but was revisited in 2026 using Claude Code
 
-
+See also web version of youtube player https://cmdcolin.github.io/ytshuffle/
