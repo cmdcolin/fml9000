@@ -6,7 +6,7 @@ use fml9000_core::{
   add_to_queue, load_track_by_filename, load_video_by_id, mark_as_played, pop_queue_front,
   queue_len, remove_from_queue, update_play_stats, MediaItem,
 };
-use fml9000_core::{Track, YouTubeVideo};
+use fml9000_core::{check_ffmpeg_available, check_yt_dlp_available, VaporwaveDecoder, YouTubeVaporwaveDecoder, Track, YouTubeVideo};
 use gtk::gdk;
 use gtk::gio::ListStore;
 use gtk::glib::{Bytes, BoxedAnyObject};
@@ -53,6 +53,8 @@ pub struct PlaybackController {
   play_stats: RefCell<CurrentPlayStats>,
   on_queue_changed: RefCell<Option<Rc<dyn Fn()>>>,
   on_track_changed: RefCell<Option<Rc<dyn Fn(u32)>>>,
+  vaporwave_enabled: Cell<bool>,
+  ffmpeg_available: Cell<Option<bool>>,
 }
 
 impl PlaybackController {
@@ -80,6 +82,8 @@ impl PlaybackController {
       play_stats: RefCell::new(CurrentPlayStats::None),
       on_queue_changed: RefCell::new(None),
       on_track_changed: RefCell::new(None),
+      vaporwave_enabled: Cell::new(false),
+      ffmpeg_available: Cell::new(None),
     })
   }
 
@@ -89,6 +93,14 @@ impl PlaybackController {
 
   pub fn window(&self) -> &Rc<ApplicationWindow> {
     &self.window
+  }
+
+  pub fn set_vaporwave_enabled(&self, enabled: bool) {
+    self.vaporwave_enabled.set(enabled);
+  }
+
+  pub fn vaporwave_enabled(&self) -> bool {
+    self.vaporwave_enabled.get()
   }
 
   pub fn playlist_len(&self) -> u32 {
@@ -163,6 +175,71 @@ impl PlaybackController {
       }
     };
 
+    if self.vaporwave_enabled.get() {
+      if self.ffmpeg_available.get().is_none() {
+        if let Err(e) = check_ffmpeg_available() {
+          self.show_error("FFmpeg Not Found", &e);
+          self.ffmpeg_available.set(Some(false));
+          return self.play_normal_track(file, &filename, index, track, artist, album, title);
+        }
+        self.ffmpeg_available.set(Some(true));
+      }
+
+      if self.ffmpeg_available.get() == Some(false) {
+        return self.play_normal_track(file, &filename, index, track, artist, album, title);
+      }
+
+      match self.try_vaporwave_decode(&filename) {
+        Ok(source) => {
+          let duration = source.total_duration();
+          let duration_secs = duration.map(|d| d.as_secs_f64()).unwrap_or(0.0);
+          self.audio.play_source(source, duration);
+          self.current_index.set(Some(index));
+          self.playback_source.set(PlaybackSource::Local);
+          mark_as_played(&MediaItem::Track(Arc::new(track.clone())));
+          *self.play_stats.borrow_mut() = CurrentPlayStats::Track {
+            filename: filename.to_string(),
+            duration_secs,
+            counted: false,
+          };
+          self.refresh_playlist_view();
+
+          if !self.try_set_embedded_cover_art(&filename) {
+            let mut cover_path = PathBuf::from(&filename);
+            cover_path.pop();
+            cover_path.push("cover.jpg");
+            self.album_art.set_filename(Some(cover_path));
+          }
+
+          self.window.set_title(Some(&format!(
+            "fml9000 // {} - {} - {}",
+            str_or_unknown(&artist),
+            str_or_unknown(&album),
+            str_or_unknown(&title),
+          )));
+
+          true
+        }
+        Err(e) => {
+          self.show_error("Vaporwave Error", &e);
+          self.play_normal_track(file, &filename, index, track, artist, album, title)
+        }
+      }
+    } else {
+      self.play_normal_track(file, &filename, index, track, artist, album, title)
+    }
+  }
+
+  fn play_normal_track(
+    &self,
+    file: BufReader<File>,
+    filename: &str,
+    index: u32,
+    track: &Track,
+    artist: Option<String>,
+    album: Option<String>,
+    title: Option<String>,
+  ) -> bool {
     let source = match Decoder::new(file) {
       Ok(s) => s,
       Err(e) => {
@@ -181,7 +258,7 @@ impl PlaybackController {
     self.playback_source.set(PlaybackSource::Local);
     mark_as_played(&MediaItem::Track(Arc::new(track.clone())));
     *self.play_stats.borrow_mut() = CurrentPlayStats::Track {
-      filename: filename.clone(),
+      filename: filename.to_string(),
       duration_secs,
       counted: false,
     };
@@ -202,6 +279,45 @@ impl PlaybackController {
     )));
 
     true
+  }
+
+  fn try_vaporwave_decode(&self, filename: &str) -> Result<Decoder<BufReader<std::io::Cursor<Vec<u8>>>>, String> {
+    let mut vw = VaporwaveDecoder::spawn(filename)?;
+    let mut stdout = vw.process_mut().stdout.take()
+      .ok_or_else(|| "Failed to get ffmpeg stdout".to_string())?;
+
+    let mut buffer = Vec::new();
+    use std::io::Read;
+    stdout.read_to_end(&mut buffer)
+      .map_err(|e| format!("Failed to read ffmpeg output: {}", e))?;
+
+    let cursor = std::io::Cursor::new(buffer);
+    Decoder::new(BufReader::new(cursor))
+      .map_err(|e| format!("Failed to decode vaporwave output: {}", e))
+  }
+
+  fn try_youtube_vaporwave_decode(&self, video_id: &str) -> Result<Decoder<BufReader<std::io::Cursor<Vec<u8>>>>, String> {
+    if check_yt_dlp_available().is_err() {
+      return Err(
+        "yt-dlp not found. Please install yt-dlp:\n\
+         • pip install yt-dlp\n\
+         • brew install yt-dlp\n\
+         • pipx install yt-dlp".to_string()
+      );
+    }
+
+    let mut yvw = YouTubeVaporwaveDecoder::spawn(video_id)?;
+    let mut stdout = yvw.process_mut().stdout.take()
+      .ok_or_else(|| "Failed to get ffmpeg stdout from YouTube pipeline".to_string())?;
+
+    let mut buffer = Vec::new();
+    use std::io::Read;
+    stdout.read_to_end(&mut buffer)
+      .map_err(|e| format!("Failed to read YouTube vaporwave output: {}", e))?;
+
+    let cursor = std::io::Cursor::new(buffer);
+    Decoder::new(BufReader::new(cursor))
+      .map_err(|e| format!("Failed to decode YouTube vaporwave output: {}", e))
   }
 
   fn try_set_embedded_cover_art(&self, filename: &str) -> bool {
@@ -242,14 +358,41 @@ impl PlaybackController {
   pub fn play_youtube_video(&self, video: &YouTubeVideo, _audio_only: bool) {
     self.audio.stop();
     self.playback_source.set(PlaybackSource::YouTube);
-    self.media_stack.set_visible_child_name("video");
-    self.video_widget.play_youtube(&video.video_id);
 
-    *self.play_stats.borrow_mut() = CurrentPlayStats::Video {
-      id: video.id,
-      duration_secs: video.duration_seconds.map(|s| s as f64).unwrap_or(0.0),
-      counted: false,
-    };
+    if self.vaporwave_enabled.get() {
+      self.media_stack.set_visible_child_name("album_art");
+      match self.try_youtube_vaporwave_decode(&video.video_id) {
+        Ok(source) => {
+          let duration = source.total_duration();
+          let duration_secs = duration.map(|d| d.as_secs_f64()).unwrap_or(0.0);
+          self.audio.play_source(source, duration);
+          *self.play_stats.borrow_mut() = CurrentPlayStats::Video {
+            id: video.id,
+            duration_secs,
+            counted: false,
+          };
+        }
+        Err(e) => {
+          self.show_error("YouTube Vaporwave Error", &e);
+          self.media_stack.set_visible_child_name("video");
+          self.video_widget.play_youtube(&video.video_id);
+          *self.play_stats.borrow_mut() = CurrentPlayStats::Video {
+            id: video.id,
+            duration_secs: video.duration_seconds.map(|s| s as f64).unwrap_or(0.0),
+            counted: false,
+          };
+        }
+      }
+    } else {
+      self.media_stack.set_visible_child_name("video");
+      self.video_widget.play_youtube(&video.video_id);
+      *self.play_stats.borrow_mut() = CurrentPlayStats::Video {
+        id: video.id,
+        duration_secs: video.duration_seconds.map(|s| s as f64).unwrap_or(0.0),
+        counted: false,
+      };
+    }
+
     self.refresh_playlist_view();
 
     self.window.set_title(Some(&format!(
