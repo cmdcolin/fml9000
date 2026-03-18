@@ -37,12 +37,12 @@ fn create_sorter(extract: impl Fn(&MediaItem) -> String + 'static) -> CustomSort
   CustomSorter::new(move |obj1, obj2| {
     let val1 = obj1
       .downcast_ref::<BoxedAnyObject>()
-      .and_then(|o| try_get_item(o))
+      .and_then(try_get_item)
       .map(|item| extract(&item))
       .unwrap_or_default();
     let val2 = obj2
       .downcast_ref::<BoxedAnyObject>()
-      .and_then(|o| try_get_item(o))
+      .and_then(try_get_item)
       .map(|item| extract(&item))
       .unwrap_or_default();
     val1.to_lowercase().cmp(&val2.to_lowercase()).into()
@@ -102,7 +102,7 @@ pub fn create_playlist_view(
     let get_track = |obj: &gtk::glib::Object| -> String {
       obj
         .downcast_ref::<BoxedAnyObject>()
-        .and_then(|o| try_get_item(o))
+        .and_then(try_get_item)
         .map(|item| match &item {
           MediaItem::Track(r) => r.track.clone().unwrap_or_default(),
           MediaItem::Video(_) => String::new(),
@@ -156,7 +156,7 @@ pub fn create_playlist_view(
     let get_duration = |obj: &gtk::glib::Object| -> i32 {
       obj
         .downcast_ref::<BoxedAnyObject>()
-        .and_then(|o| try_get_item(o))
+        .and_then(try_get_item)
         .map(|item| item.duration_seconds().unwrap_or(0))
         .unwrap_or(0)
     };
@@ -187,7 +187,7 @@ pub fn create_playlist_view(
     let get_count = |obj: &gtk::glib::Object| -> i32 {
       obj
         .downcast_ref::<BoxedAnyObject>()
-        .and_then(|o| try_get_item(o))
+        .and_then(try_get_item)
         .map(|item| item.play_count())
         .unwrap_or(0)
     };
@@ -762,7 +762,7 @@ fn parse_youtube_title(title: &str) -> (String, String) {
       .next()
       .unwrap_or(rest)
       .trim()
-      .trim_end_matches(|c| c == ')' || c == ' ')
+      .trim_end_matches([')', ' '])
       .split('(')
       .next()
       .unwrap_or(rest)

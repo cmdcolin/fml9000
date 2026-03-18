@@ -460,7 +460,7 @@ pub async fn dialog(
 
               let confirm = gtk::AlertDialog::builder()
                 .modal(true)
-                .message(&format!("{stale_count} tracks no longer found on disk. Remove from library?"))
+                .message(format!("{stale_count} tracks no longer found on disk. Remove from library?"))
                 .detail(&detail)
                 .buttons(["Cancel", "Remove"])
                 .default_button(0)
@@ -916,7 +916,7 @@ fn build_channel_rows(
       };
 
       let progress_dialog = gtk::Window::builder()
-        .title(&format!("Refreshing {}", channel_name))
+        .title(format!("Refreshing {}", channel_name))
         .modal(true)
         .transient_for(&prefs_window)
         .default_width(400)
@@ -935,7 +935,7 @@ fn build_channel_rows(
         .build();
 
       let status_label = gtk::Label::builder()
-        .label(&format!("Refreshing {}...", channel_name))
+        .label(format!("Refreshing {}...", channel_name))
         .xalign(0.0)
         .wrap(true)
         .build();
@@ -1061,7 +1061,7 @@ fn build_channel_rows(
       let dialog = gtk::AlertDialog::builder()
         .modal(true)
         .message("Delete Channel?")
-        .detail(&format!(
+        .detail(format!(
           "Delete channel \u{201c}{}\u{201d} and all its {} videos?",
           channel_name_for_delete, video_count_for_delete
         ))

@@ -1,6 +1,7 @@
 mod browse_card;
 mod browse_view;
 mod facet_box;
+mod file_watcher;
 mod grid_cell;
 mod gtk_helpers;
 mod header_bar;
@@ -11,6 +12,7 @@ mod playlist_manager;
 mod playlist_view;
 mod preferences_dialog;
 mod settings;
+mod source_model;
 mod video_widget;
 mod youtube;
 mod youtube_add_dialog;
@@ -168,7 +170,7 @@ fn app_main(application: &Application) {
 
             let confirm = gtk::AlertDialog::builder()
               .modal(true)
-              .message(&format!("{stale_count} tracks no longer found on disk. Remove from library?"))
+              .message(format!("{stale_count} tracks no longer found on disk. Remove from library?"))
               .detail(&detail)
               .buttons(["Cancel", "Remove"])
               .default_button(0)
@@ -202,6 +204,37 @@ fn app_main(application: &Application) {
       glib::ControlFlow::Continue
     });
   }
+
+  let _watcher = {
+    let folders = settings.borrow().folders.clone();
+    if let Some((watcher, watch_rx)) = file_watcher::start_file_watcher(&folders) {
+      let ps = playlist_store.clone();
+      let fs = facet_store.clone();
+      glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
+        let mut changed = false;
+        while let Ok(event) = watch_rx.try_recv() {
+          match file_watcher::handle_file_event(event) {
+            file_watcher::FileChangeResult::Added | file_watcher::FileChangeResult::Removed => {
+              changed = true;
+            }
+            file_watcher::FileChangeResult::NoChange => {}
+          }
+        }
+        if changed {
+          if let Ok(fresh_tracks) = fml9000_core::load_tracks() {
+            ps.remove_all();
+            load_playlist_store(fresh_tracks.iter(), &ps);
+            fs.remove_all();
+            load_facet_store(&fresh_tracks, &fs);
+          }
+        }
+        glib::ControlFlow::Continue
+      });
+      Some(watcher)
+    } else {
+      None
+    }
+  };
 
   let playback_controller = PlaybackController::new(
     audio.clone(),

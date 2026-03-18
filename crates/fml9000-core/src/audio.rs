@@ -31,7 +31,7 @@ impl AudioPlayer {
   fn init_audio() -> Result<AudioState, String> {
     let stream = OutputStreamBuilder::open_default_stream()
       .map_err(|e| format!("Failed to initialize audio output: {e}"))?;
-    let sink = Sink::connect_new(&stream.mixer());
+    let sink = Sink::connect_new(stream.mixer());
     Ok(AudioState {
       _stream: stream,
       sink,

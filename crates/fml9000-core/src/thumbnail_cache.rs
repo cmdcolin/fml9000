@@ -51,11 +51,10 @@ pub fn download_all_video_thumbnails(
     let url = video.thumbnail_url.clone().unwrap_or_else(|| {
       format!("https://i.ytimg.com/vi/{}/mqdefault.jpg", video.video_id)
     });
-    if get_cached_path(&url).is_none() {
-      if fetch_and_cache_url(&url).is_some() {
+    if get_cached_path(&url).is_none()
+      && fetch_and_cache_url(&url).is_some() {
         downloaded += 1;
       }
-    }
     on_progress(i + 1, total);
   }
   (downloaded, total)
@@ -68,11 +67,10 @@ pub fn download_all_album_art(
   let total = albums.len();
   let mut extracted = 0;
   for (i, track) in albums.iter().enumerate() {
-    if get_cached_path(&track.filename).is_none() {
-      if extract_and_cache_album_art(&track.filename).is_some() {
+    if get_cached_path(&track.filename).is_none()
+      && extract_and_cache_album_art(&track.filename).is_some() {
         extracted += 1;
       }
-    }
     on_progress(i + 1, total);
   }
   (extracted, total)

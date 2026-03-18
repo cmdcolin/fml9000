@@ -2,12 +2,12 @@ use crate::browse_card::BrowseCard;
 use crate::grid_cell::{Entry, GridCell};
 use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
-use fml9000_core::{
-  get_all_media, get_all_videos, get_distinct_albums, get_playlist_items, get_user_playlists,
-  get_videos_for_channel, get_youtube_channels, load_recently_added_items,
-  load_recently_played_items, MediaItem,
+use crate::source_model::{
+  build_section_children, get_distinct_album_items, populate_section_headers,
+  try_get_source_from_row, SourceKind, TreeEntry,
 };
 use fml9000_core::thumbnail_cache;
+use fml9000_core::MediaItem;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
@@ -21,31 +21,6 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-enum BrowseSource {
-  AllMedia,
-  RecentlyAdded,
-  RecentlyPlayed,
-  Albums,
-  AllVideos,
-  UserPlaylist(i32, String),
-  YouTubeChannel(i32, String),
-}
-
-impl BrowseSource {
-  fn label(&self) -> String {
-    match self {
-      BrowseSource::AllMedia => "All Media".to_string(),
-      BrowseSource::RecentlyAdded => "Recently Added".to_string(),
-      BrowseSource::RecentlyPlayed => "Recently Played".to_string(),
-      BrowseSource::Albums => "Albums".to_string(),
-      BrowseSource::AllVideos => "All Videos".to_string(),
-      BrowseSource::UserPlaylist(_, name) => name.clone(),
-      BrowseSource::YouTubeChannel(_, name) => name.clone(),
-    }
-  }
-}
-
-#[derive(Clone)]
 enum BrowseItem {
   Media(MediaItem),
   Album {
@@ -55,113 +30,33 @@ enum BrowseItem {
   },
 }
 
-#[derive(Clone)]
-enum SectionKind {
-  AutoPlaylists,
-  UserPlaylists,
-  YouTubeChannels,
+fn collect_items_for_source(source: &SourceKind) -> Vec<BrowseItem> {
+  if *source == SourceKind::Albums {
+    return get_distinct_album_items()
+      .into_iter()
+      .map(|(artist, album, filename)| BrowseItem::Album {
+        artist,
+        album,
+        representative_filename: filename,
+      })
+      .collect();
+  }
+  source.load_items().into_iter().map(BrowseItem::Media).collect()
 }
 
-enum SourceEntry {
-  SectionHeader(String, SectionKind),
-  Source(BrowseSource),
-}
-
-fn build_children_store(kind: &SectionKind) -> ListStore {
-  let store = ListStore::new::<BoxedAnyObject>();
-  match kind {
-    SectionKind::AutoPlaylists => {
-      for source in [
-        BrowseSource::AllMedia,
-        BrowseSource::RecentlyAdded,
-        BrowseSource::RecentlyPlayed,
-        BrowseSource::Albums,
-        BrowseSource::AllVideos,
-      ] {
-        store.append(&BoxedAnyObject::new(SourceEntry::Source(source)));
+fn browse_item_cache_key(item: &BrowseItem) -> Option<String> {
+  match item {
+    BrowseItem::Media(media_item) => {
+      if let Some(url) = media_item.thumbnail_url() {
+        Some(url)
+      } else {
+        media_item.track_filename().map(|s| s.to_string())
       }
     }
-    SectionKind::UserPlaylists => {
-      if let Ok(playlists) = get_user_playlists() {
-        for pl in playlists {
-          store.append(&BoxedAnyObject::new(SourceEntry::Source(
-            BrowseSource::UserPlaylist(pl.id, pl.name.clone()),
-          )));
-        }
-      }
-    }
-    SectionKind::YouTubeChannels => {
-      if let Ok(channels) = get_youtube_channels() {
-        for ch in channels {
-          store.append(&BoxedAnyObject::new(SourceEntry::Source(
-            BrowseSource::YouTubeChannel(ch.id, ch.name.clone()),
-          )));
-        }
-      }
+    BrowseItem::Album { representative_filename, .. } => {
+      Some(representative_filename.clone())
     }
   }
-  store
-}
-
-fn collect_items_for_source(source: &BrowseSource) -> Vec<BrowseItem> {
-  let mut items = Vec::new();
-  match source {
-    BrowseSource::AllMedia => {
-      for item in get_all_media() {
-        items.push(BrowseItem::Media(item));
-      }
-    }
-    BrowseSource::RecentlyAdded => {
-      for item in load_recently_added_items(50) {
-        items.push(BrowseItem::Media(item));
-      }
-    }
-    BrowseSource::RecentlyPlayed => {
-      for item in load_recently_played_items(50) {
-        items.push(BrowseItem::Media(item));
-      }
-    }
-    BrowseSource::Albums => {
-      for track in get_distinct_albums() {
-        let artist = track
-          .album_artist
-          .clone()
-          .or(track.artist.clone())
-          .unwrap_or_else(|| "Unknown".to_string());
-        let album = track
-          .album
-          .clone()
-          .unwrap_or_else(|| "Unknown".to_string());
-        items.push(BrowseItem::Album {
-          artist,
-          album,
-          representative_filename: track.filename.clone(),
-        });
-      }
-    }
-    BrowseSource::AllVideos => {
-      if let Ok(videos) = get_all_videos() {
-        for video in videos {
-          items.push(BrowseItem::Media(MediaItem::Video(video)));
-        }
-      }
-    }
-    BrowseSource::UserPlaylist(id, _) => {
-      if let Ok(playlist_items) = get_playlist_items(*id) {
-        for item in playlist_items {
-          items.push(BrowseItem::Media(item));
-        }
-      }
-    }
-    BrowseSource::YouTubeChannel(id, _) => {
-      if let Ok(videos) = get_videos_for_channel(*id) {
-        for video in videos {
-          items.push(BrowseItem::Media(MediaItem::Video(video)));
-        }
-      }
-    }
-  }
-  items
 }
 
 fn item_matches_search(item: &BrowseItem, query: &str) -> bool {
@@ -211,22 +106,7 @@ fn spawn_fetch(
   });
 }
 
-fn browse_item_cache_key(item: &BrowseItem) -> Option<String> {
-  match item {
-    BrowseItem::Media(media_item) => {
-      if let Some(url) = media_item.thumbnail_url() {
-        Some(url)
-      } else {
-        media_item.track_filename().map(|s| s.to_string())
-      }
-    }
-    BrowseItem::Album { representative_filename, .. } => {
-      Some(representative_filename.clone())
-    }
-  }
-}
-
-fn reload_grid(grid_store: &ListStore, sources: &[BrowseSource], search_query: &str) {
+fn reload_grid(grid_store: &ListStore, sources: &[SourceKind], search_query: &str) {
   grid_store.remove_all();
 
   let mut items: Vec<BrowseItem> = Vec::new();
@@ -238,44 +118,20 @@ fn reload_grid(grid_store: &ListStore, sources: &[BrowseSource], search_query: &
     }
   }
 
-  let mut uncached_urls: Vec<String> = Vec::new();
-  for item in &items {
-    if let BrowseItem::Media(media_item) = item {
-      if let Some(url) = media_item.thumbnail_url() {
-        if thumbnail_cache::get_cached_path(&url).is_none() {
-          uncached_urls.push(url);
-        }
-      }
-    }
-  }
-
   for item in &items {
     grid_store.append(&BoxedAnyObject::new(item.clone()));
   }
-
-  if !uncached_urls.is_empty() {
-    std::thread::spawn(move || {
-      for url in uncached_urls {
-        let _ = thumbnail_cache::fetch_and_cache_url(&url);
-      }
-    });
-  }
 }
 
-fn get_selected_sources(tree_model: &TreeListModel, selection: &MultiSelection) -> Vec<BrowseSource> {
+fn get_selected_sources(tree_model: &TreeListModel, selection: &MultiSelection) -> Vec<SourceKind> {
   let mut selected = Vec::new();
   let sel = selection.selection();
   for i in 0..tree_model.n_items() {
     if sel.contains(i) {
       if let Some(item) = tree_model.item(i) {
         if let Some(row) = item.downcast_ref::<TreeListRow>() {
-          if let Some(obj) = row.item() {
-            if let Some(obj) = obj.downcast_ref::<BoxedAnyObject>() {
-              let entry: Ref<SourceEntry> = obj.borrow();
-              if let SourceEntry::Source(source) = &*entry {
-                selected.push(source.clone());
-              }
-            }
+          if let Some(source) = try_get_source_from_row(row) {
+            selected.push(source);
           }
         }
       }
@@ -313,10 +169,12 @@ pub fn create_browse_view(
         if let Some(obj) = grid_store_for_thumb.item(i) {
           if let Ok(boxed) = obj.downcast::<BoxedAnyObject>() {
             if let Ok(item) = boxed.try_borrow::<BrowseItem>() {
-              let cache_key = browse_item_cache_key(&item);
-              if let Some(key) = cache_key {
+              if let Some(key) = browse_item_cache_key(&item) {
                 if keys.contains(&key) {
-                  grid_store_for_thumb.items_changed(i, 1, 1);
+                  let cloned = item.clone();
+                  drop(item);
+                  grid_store_for_thumb.remove(i);
+                  grid_store_for_thumb.insert(i, &BoxedAnyObject::new(cloned));
                 }
               }
             }
@@ -327,26 +185,16 @@ pub fn create_browse_view(
     gtk::glib::ControlFlow::Continue
   });
 
+  // Source tree sidebar
   let source_store = ListStore::new::<BoxedAnyObject>();
-  source_store.append(&BoxedAnyObject::new(SourceEntry::SectionHeader(
-    "Auto Playlists".to_string(),
-    SectionKind::AutoPlaylists,
-  )));
-  source_store.append(&BoxedAnyObject::new(SourceEntry::SectionHeader(
-    "Playlists".to_string(),
-    SectionKind::UserPlaylists,
-  )));
-  source_store.append(&BoxedAnyObject::new(SourceEntry::SectionHeader(
-    "YouTube Channels".to_string(),
-    SectionKind::YouTubeChannels,
-  )));
+  populate_section_headers(&source_store);
 
   let tree_model = TreeListModel::new(source_store, false, true, |item| {
     let obj = item.downcast_ref::<BoxedAnyObject>()?;
-    let entry: Ref<SourceEntry> = obj.borrow();
+    let entry: Ref<TreeEntry> = obj.borrow();
     match &*entry {
-      SourceEntry::SectionHeader(_, kind) => Some(build_children_store(kind).into()),
-      SourceEntry::Source(_) => None,
+      TreeEntry::SectionHeader(_, kind) => Some(build_section_children(kind).into()),
+      TreeEntry::Source(_) => None,
     }
   });
 
@@ -374,13 +222,13 @@ pub fn create_browse_view(
     cell.set_row_height(row_height.height_pixels(), row_height.is_compact());
 
     let obj = row.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
-    let entry: Ref<SourceEntry> = obj.borrow();
+    let entry: Ref<TreeEntry> = obj.borrow();
     match &*entry {
-      SourceEntry::SectionHeader(name, _) => {
+      TreeEntry::SectionHeader(name, _) => {
         cell.set_entry(&Entry { name: name.clone() });
         cell.add_css_class("section-header");
       }
-      SourceEntry::Source(source) => {
+      TreeEntry::Source(source) => {
         cell.set_entry(&Entry { name: source.label() });
         cell.remove_css_class("section-header");
       }
@@ -501,6 +349,7 @@ pub fn create_browse_view(
     }
   });
 
+  // Download thumbnails button
   let download_btn = gtk::Button::builder()
     .icon_name("folder-download-symbolic")
     .tooltip_text("Download all thumbnails")
@@ -558,12 +407,12 @@ pub fn create_browse_view(
     let (tx, rx) = std::sync::mpsc::channel::<ThumbnailProgress>();
     std::thread::spawn(move || {
       let tx_video = tx.clone();
-      let (video_dl, _video_total) = thumbnail_cache::download_all_video_thumbnails(move |done, total| {
+      let (video_dl, _) = thumbnail_cache::download_all_video_thumbnails(move |done, total| {
         let _ = tx_video.send(ThumbnailProgress::VideoProgress(done, total));
       });
 
       let tx_album = tx.clone();
-      let (album_dl, _album_total) = thumbnail_cache::download_all_album_art(move |done, total| {
+      let (album_dl, _) = thumbnail_cache::download_all_album_art(move |done, total| {
         let _ = tx_album.send(ThumbnailProgress::AlbumProgress(done, total));
       });
 
@@ -615,6 +464,24 @@ pub fn create_browse_view(
     });
   });
 
+  // Search bar
+  let search_entry = gtk::SearchEntry::builder()
+    .placeholder_text("Filter...")
+    .hexpand(true)
+    .build();
+
+  let grid_store_for_search = grid_store.clone();
+  let tree_model_for_search = tree_model.clone();
+  let source_sel_for_search = source_selection.clone();
+  let search_for_entry = Rc::clone(&search_query);
+  search_entry.connect_search_changed(move |entry| {
+    let query = entry.text().to_string();
+    *search_for_entry.borrow_mut() = query.clone();
+    let selected = get_selected_sources(&tree_model_for_search, &source_sel_for_search);
+    reload_grid(&grid_store_for_search, &selected, &query);
+  });
+
+  // Layout
   let sidebar_header = gtk::Box::builder()
     .orientation(gtk::Orientation::Horizontal)
     .build();
@@ -639,22 +506,6 @@ pub fn create_browse_view(
     .build();
   sidebar.append(&sidebar_header);
   sidebar.append(&sidebar_scrolled);
-
-  let search_entry = gtk::SearchEntry::builder()
-    .placeholder_text("Filter...")
-    .hexpand(true)
-    .build();
-
-  let grid_store_for_search = grid_store.clone();
-  let tree_model_for_search = tree_model.clone();
-  let source_sel_for_search = source_selection.clone();
-  let search_for_entry = Rc::clone(&search_query);
-  search_entry.connect_search_changed(move |entry| {
-    let query = entry.text().to_string();
-    *search_for_entry.borrow_mut() = query.clone();
-    let selected = get_selected_sources(&tree_model_for_search, &source_sel_for_search);
-    reload_grid(&grid_store_for_search, &selected, &query);
-  });
 
   let grid_scrolled = ScrolledWindow::builder()
     .hexpand(true)

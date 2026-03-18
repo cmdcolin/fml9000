@@ -103,7 +103,7 @@ const AUDIO_EXTENSIONS: &[&str] = &[
   "mp4", "webm",
 ];
 
-fn is_audio_file(path: &std::path::Path) -> bool {
+pub fn is_audio_file(path: &std::path::Path) -> bool {
   path
     .extension()
     .and_then(|ext| ext.to_str())
@@ -252,6 +252,76 @@ pub fn run_scan_with_progress(
     .collect();
 
   let _ = progress_sender.send(ScanProgress::Complete { total_found, skipped: total_skipped, added: total_added, updated: total_updated, stale_files });
+}
+
+pub fn scan_single_file(path: &std::path::Path) -> Result<Option<Arc<Track>>, String> {
+  use crate::schema::tracks::dsl;
+
+  if !is_audio_file(path) {
+    return Ok(None);
+  }
+
+  let path_str = path.to_str().ok_or_else(|| "Non-UTF-8 path".to_string())?;
+
+  with_db(|conn| {
+    let existing: Option<Track> = dsl::tracks
+      .filter(dsl::filename.eq(path_str))
+      .first(conn)
+      .optional()
+      .map_err(|e| format!("DB query error: {e}"))?;
+
+    if existing.is_some() {
+      return Ok(None);
+    }
+
+    let probe = Probe::open(path_str).map_err(|e| format!("Could not open file: {e}"))?;
+    let tagged_file = probe.read().map_err(|e| format!("Could not read tags: {e}"))?;
+
+    let tag = tagged_file
+      .primary_tag()
+      .or_else(|| tagged_file.first_tag());
+
+    let duration_seconds: Option<i32> = tagged_file
+      .properties()
+      .duration()
+      .as_secs()
+      .try_into()
+      .ok();
+
+    let (artist, album, album_artist, title, track, genre) = if let Some(t) = tag {
+      (
+        t.artist().as_deref().map(str::to_string),
+        t.album().as_deref().map(str::to_string),
+        t.get_string(ItemKey::AlbumArtist).map(str::to_string),
+        t.title().as_deref().map(str::to_string),
+        t.get_string(ItemKey::TrackNumber).map(str::to_string),
+        t.genre().as_deref().map(str::to_string),
+      )
+    } else {
+      (None, None, None, None, None, None)
+    };
+
+    diesel::insert_into(tracks::table)
+      .values(NewTrack {
+        filename: path_str,
+        artist: artist.as_deref(),
+        album: album.as_deref(),
+        album_artist: album_artist.as_deref(),
+        title: title.as_deref(),
+        track: track.as_deref(),
+        genre: genre.as_deref(),
+        duration_seconds,
+      })
+      .execute(conn)
+      .map_err(|e| format!("Failed to insert track: {e}"))?;
+
+    let inserted: Track = dsl::tracks
+      .filter(dsl::filename.eq(path_str))
+      .first(conn)
+      .map_err(|e| format!("Failed to load inserted track: {e}"))?;
+
+    Ok(Some(Arc::new(inserted)))
+  })
 }
 
 pub fn delete_tracks_by_filename(filenames: &[String]) -> Result<usize, String> {
