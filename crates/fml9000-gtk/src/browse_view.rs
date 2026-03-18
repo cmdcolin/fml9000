@@ -6,6 +6,7 @@ use crate::source_model::{
   build_section_children, get_distinct_album_items, populate_section_headers,
   try_get_source_from_row, SourceKind, TreeEntry,
 };
+use crate::youtube_add_dialog;
 use fml9000_core::thumbnail_cache;
 use fml9000_core::MediaItem;
 use gtk::gio::ListStore;
@@ -188,6 +189,7 @@ pub fn create_browse_view(
   // Source tree sidebar
   let source_store = ListStore::new::<BoxedAnyObject>();
   populate_section_headers(&source_store);
+  let source_store_ref = source_store.clone();
 
   let tree_model = TreeListModel::new(source_store, false, true, |item| {
     let obj = item.downcast_ref::<BoxedAnyObject>()?;
@@ -481,6 +483,23 @@ pub fn create_browse_view(
     reload_grid(&grid_store_for_search, &selected, &query);
   });
 
+  // Add YouTube channel button
+  let add_channel_btn = gtk::Button::builder()
+    .icon_name("list-add-symbolic")
+    .tooltip_text("Add YouTube channel")
+    .css_classes(["flat"])
+    .build();
+
+  let pc_for_add = Rc::clone(&playback_controller);
+  let source_store_for_add = source_store_ref.clone();
+  add_channel_btn.connect_clicked(move |_| {
+    let source_store = source_store_for_add.clone();
+    youtube_add_dialog::show_dialog(Rc::clone(&pc_for_add), move || {
+      source_store.remove_all();
+      populate_section_headers(&source_store);
+    });
+  });
+
   // Layout
   let sidebar_header = gtk::Box::builder()
     .orientation(gtk::Orientation::Horizontal)
@@ -492,6 +511,7 @@ pub fn create_browse_view(
       .xalign(0.0)
       .build(),
   );
+  sidebar_header.append(&add_channel_btn);
   sidebar_header.append(&download_btn);
 
   let sidebar_scrolled = ScrolledWindow::builder()
