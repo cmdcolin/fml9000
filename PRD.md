@@ -39,6 +39,9 @@ threshold logic.
 
 ### P0 — Polish & Reliability
 
+- ~~**Rescan file watcher**~~ ✓ — wired up `notify` to detect new/deleted files
+  in configured folders and update the DB + stores automatically.
+
 - **MPRIS/D-Bus integration** — expose playback state to the Linux desktop so
   media keys, KDE Connect, and status widgets work. The `mpris-server` crate
   provides a clean async API for this.
@@ -47,11 +50,10 @@ threshold logic.
   current one finishes. Pre-decode the next track and queue it when the current
   track is ~5 seconds from ending.
 
-- **Rescan file watcher** — the GTK app imports `notify` but doesn't use it for
-  live library updates. Wire the `notify` watcher to detect new/deleted files in
-  configured folders and update the DB + stores automatically.
-
 ### P1 — Browse Tab Enhancements
+
+- ~~**Album detail view**~~ ✓ — clicking an album card shows all tracks with
+  play-all and queue-all actions, with a back button to return to the grid.
 
 - **Lazy thumbnail loading indicator** — show a spinner or placeholder icon while
   thumbnails are being fetched, instead of a blank space.
@@ -59,12 +61,6 @@ threshold logic.
 - **Thumbnail grid responsiveness** — currently the grid auto-sizes columns
   between 2-20. Add a zoom slider or use the window width to compute a sensible
   default column count.
-
-- **Album detail view** — clicking an album card in the browse grid could expand
-  to show all tracks in that album, with play-all and queue-all actions.
-
-- **Thumbnail cache management** — add a "Clear thumbnail cache" option in
-  preferences. Show cache size.
 
 ### P2 — Library & Metadata
 

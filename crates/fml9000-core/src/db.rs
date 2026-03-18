@@ -661,6 +661,30 @@ pub fn load_track_by_filename(path: &str) -> Option<Arc<Track>> {
   .unwrap_or(None)
 }
 
+pub fn load_tracks_by_album(artist_query: &str, album_query: &str) -> Vec<Arc<Track>> {
+  use crate::schema::tracks::dsl;
+
+  with_db(|conn| {
+    let all: Vec<Track> = dsl::tracks
+      .filter(dsl::album.eq(album_query))
+      .order(dsl::track.asc())
+      .load::<Track>(conn)
+      .unwrap_or_default();
+
+    let result: Vec<Arc<Track>> = all
+      .into_iter()
+      .filter(|t| {
+        let t_artist = t.album_artist.as_deref().or(t.artist.as_deref()).unwrap_or("Unknown");
+        t_artist == artist_query
+      })
+      .map(Arc::new)
+      .collect();
+
+    Ok(result)
+  })
+  .unwrap_or_default()
+}
+
 pub fn load_video_by_id(vid_id: i32) -> Option<Arc<YouTubeVideo>> {
   use crate::schema::youtube_videos;
 

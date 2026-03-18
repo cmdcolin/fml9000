@@ -7,14 +7,14 @@ use crate::source_model::{
   try_get_source_from_row, SourceKind, TreeEntry,
 };
 use crate::youtube_add_dialog;
-use fml9000_core::thumbnail_cache;
+use fml9000_core::{format_duration_secs, load_tracks_by_album, thumbnail_cache};
 use fml9000_core::MediaItem;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  ColumnView, ColumnViewColumn, MultiSelection, ScrolledWindow, SignalListItemFactory,
-  TreeExpander, TreeListModel, TreeListRow,
+  ColumnView, ColumnViewColumn, ContentFit, MultiSelection, Orientation, Picture, ScrolledWindow,
+  SignalListItemFactory, Stack, TreeExpander, TreeListModel, TreeListRow,
 };
 use std::cell::{Ref, RefCell};
 use std::collections::HashSet;
@@ -141,12 +141,208 @@ fn get_selected_sources(tree_model: &TreeListModel, selection: &MultiSelection) 
   selected
 }
 
+fn build_album_detail(
+  artist: &str,
+  album: &str,
+  representative_filename: &str,
+  playback_controller: &Rc<PlaybackController>,
+  content_stack: &Stack,
+) -> gtk::Box {
+  let tracks = load_tracks_by_album(artist, album);
+
+  let detail = gtk::Box::builder()
+    .orientation(Orientation::Vertical)
+    .spacing(0)
+    .hexpand(true)
+    .vexpand(true)
+    .build();
+
+  // Header with back button
+  let header = gtk::Box::builder()
+    .orientation(Orientation::Horizontal)
+    .spacing(8)
+    .margin_start(8)
+    .margin_end(8)
+    .margin_top(4)
+    .margin_bottom(4)
+    .build();
+
+  let back_btn = gtk::Button::builder()
+    .icon_name("go-previous-symbolic")
+    .tooltip_text("Back to browse")
+    .css_classes(["flat"])
+    .build();
+
+  let stack_for_back = content_stack.clone();
+  back_btn.connect_clicked(move |_| {
+    stack_for_back.set_visible_child_name("grid");
+  });
+
+  header.append(&back_btn);
+  header.append(
+    &gtk::Label::builder()
+      .label(&format!("{} — {}", artist, album))
+      .hexpand(true)
+      .xalign(0.0)
+      .ellipsize(gtk::pango::EllipsizeMode::End)
+      .css_classes(["heading"])
+      .build(),
+  );
+  detail.append(&header);
+  detail.append(&gtk::Separator::new(Orientation::Horizontal));
+
+  // Album info row: art + track list
+  let info_row = gtk::Box::builder()
+    .orientation(Orientation::Horizontal)
+    .spacing(16)
+    .margin_start(16)
+    .margin_end(16)
+    .margin_top(12)
+    .vexpand(true)
+    .build();
+
+  // Album art
+  let art = Picture::builder()
+    .width_request(250)
+    .height_request(250)
+    .content_fit(ContentFit::Contain)
+    .valign(gtk::Align::Start)
+    .build();
+
+  if let Some(cached) = thumbnail_cache::get_cached_path(representative_filename) {
+    art.set_filename(Some(cached));
+  } else {
+    // Try to extract inline
+    if let Some(cached) = thumbnail_cache::extract_and_cache_album_art(representative_filename) {
+      art.set_filename(Some(cached));
+    }
+  }
+
+  let art_and_buttons = gtk::Box::builder()
+    .orientation(Orientation::Vertical)
+    .spacing(8)
+    .build();
+  art_and_buttons.append(&art);
+
+  // Action buttons
+  let button_box = gtk::Box::builder()
+    .orientation(Orientation::Horizontal)
+    .spacing(8)
+    .halign(gtk::Align::Center)
+    .build();
+
+  let play_all_btn = gtk::Button::builder()
+    .label("Play All")
+    .css_classes(["suggested-action"])
+    .build();
+
+  let queue_all_btn = gtk::Button::builder()
+    .label("Queue All")
+    .build();
+
+  let tracks_for_play = tracks.clone();
+  let pc_for_play = Rc::clone(playback_controller);
+  play_all_btn.connect_clicked(move |_| {
+    if let Some(first) = tracks_for_play.first() {
+      pc_for_play.play_media_item(&MediaItem::Track(first.clone()));
+    }
+  });
+
+  let tracks_for_queue = tracks.clone();
+  let pc_for_queue = Rc::clone(playback_controller);
+  queue_all_btn.connect_clicked(move |_| {
+    for track in &tracks_for_queue {
+      pc_for_queue.queue_item(&MediaItem::Track(track.clone()));
+    }
+  });
+
+  button_box.append(&play_all_btn);
+  button_box.append(&queue_all_btn);
+  art_and_buttons.append(&button_box);
+
+  info_row.append(&art_and_buttons);
+
+  // Track list
+  let track_list = gtk::Box::builder()
+    .orientation(Orientation::Vertical)
+    .spacing(2)
+    .hexpand(true)
+    .valign(gtk::Align::Start)
+    .build();
+
+  for track in &tracks {
+    let row = gtk::Box::builder()
+      .orientation(Orientation::Horizontal)
+      .spacing(8)
+      .css_classes(["browse-track-row"])
+      .build();
+
+    let track_num = track.track.as_deref().unwrap_or("");
+    let title = track.title.as_deref().unwrap_or("Unknown");
+    let duration = track
+      .duration_seconds
+      .map(format_duration_secs)
+      .unwrap_or_default();
+
+    if !track_num.is_empty() {
+      row.append(
+        &gtk::Label::builder()
+          .label(track_num)
+          .width_chars(3)
+          .xalign(1.0)
+          .css_classes(["dim-label", "monospace"])
+          .build(),
+      );
+    }
+
+    row.append(
+      &gtk::Label::builder()
+        .label(title)
+        .hexpand(true)
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build(),
+    );
+
+    row.append(
+      &gtk::Label::builder()
+        .label(&duration)
+        .css_classes(["dim-label", "monospace"])
+        .build(),
+    );
+
+    let track_clone = track.clone();
+    let pc = Rc::clone(playback_controller);
+    let gesture = gtk::GestureClick::new();
+    gesture.connect_released(move |_, _, _, _| {
+      pc.play_media_item(&MediaItem::Track(track_clone.clone()));
+    });
+    row.add_controller(gesture);
+
+    track_list.append(&row);
+  }
+
+  let track_scrolled = ScrolledWindow::builder()
+    .hexpand(true)
+    .vexpand(true)
+    .child(&track_list)
+    .build();
+  info_row.append(&track_scrolled);
+
+  detail.append(&info_row);
+  detail
+}
+
 pub fn create_browse_view(
   playback_controller: Rc<PlaybackController>,
   settings: Rc<RefCell<FmlSettings>>,
 ) -> gtk::Box {
   let grid_store = ListStore::new::<BoxedAnyObject>();
   let search_query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+
+  let content_stack = Stack::new();
+  content_stack.set_hexpand(true);
+  content_stack.set_vexpand(true);
 
   let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<String>();
   let thumb_tx = Arc::new(Mutex::new(thumb_tx));
@@ -253,9 +449,11 @@ pub fn create_browse_view(
   let grid_store_for_sel = grid_store.clone();
   let tree_model_for_sel = tree_model.clone();
   let search_for_sel = Rc::clone(&search_query);
+  let content_stack_for_sel = content_stack.clone();
   source_selection.connect_selection_changed(move |sel, _, _| {
     let selected = get_selected_sources(&tree_model_for_sel, sel);
     reload_grid(&grid_store_for_sel, &selected, &search_for_sel.borrow());
+    content_stack_for_sel.set_visible_child_name("grid");
   });
 
   // Grid view
@@ -330,6 +528,7 @@ pub fn create_browse_view(
 
   let grid_store_for_activate = grid_store.clone();
   let pc_for_activate = Rc::clone(&playback_controller);
+  let content_stack_for_activate = content_stack.clone();
   grid_view.connect_activate(move |_view, pos| {
     if let Some(obj) = grid_store_for_activate.item(pos) {
       if let Ok(boxed) = obj.downcast::<BoxedAnyObject>() {
@@ -339,12 +538,23 @@ pub fn create_browse_view(
             pc_for_activate.play_media_item(item);
           }
           BrowseItem::Album {
+            artist,
+            album,
             representative_filename,
-            ..
           } => {
-            if let Some(track) = fml9000_core::load_track_by_filename(representative_filename) {
-              pc_for_activate.play_media_item(&MediaItem::Track(track));
+            // Remove old detail page if present
+            if let Some(old) = content_stack_for_activate.child_by_name("detail") {
+              content_stack_for_activate.remove(&old);
             }
+            let detail = build_album_detail(
+              artist,
+              album,
+              representative_filename,
+              &pc_for_activate,
+              &content_stack_for_activate,
+            );
+            content_stack_for_activate.add_named(&detail, Some("detail"));
+            content_stack_for_activate.set_visible_child_name("detail");
           }
         }
       }
@@ -533,22 +743,25 @@ pub fn create_browse_view(
     .child(&grid_view)
     .build();
 
-  let grid_container = gtk::Box::builder()
-    .orientation(gtk::Orientation::Vertical)
+  let grid_page = gtk::Box::builder()
+    .orientation(Orientation::Vertical)
     .hexpand(true)
     .vexpand(true)
     .build();
-  grid_container.append(&search_entry);
-  grid_container.append(&grid_scrolled);
+  grid_page.append(&search_entry);
+  grid_page.append(&grid_scrolled);
+
+  content_stack.add_named(&grid_page, Some("grid"));
+  content_stack.set_visible_child_name("grid");
 
   let paned = gtk::Paned::builder()
-    .orientation(gtk::Orientation::Horizontal)
+    .orientation(Orientation::Horizontal)
     .start_child(&sidebar)
-    .end_child(&grid_container)
+    .end_child(&content_stack)
     .build();
   paned.set_position(200);
 
-  let main_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+  let main_box = gtk::Box::new(Orientation::Horizontal, 0);
   main_box.set_hexpand(true);
   main_box.set_vexpand(true);
   main_box.append(&paned);
