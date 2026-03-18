@@ -2,7 +2,17 @@ use crate::grid_cell::GridCell;
 use adw::prelude::*;
 use fml9000_core::Track;
 use gtk::glib::{BoxedAnyObject, Object};
-use gtk::{ListItem, MultiSelection};
+use gtk::{AlertDialog, ApplicationWindow, ListItem, MultiSelection};
+
+pub fn show_error_dialog(window: &ApplicationWindow, title: &str, message: &str) {
+  let dialog = AlertDialog::builder()
+    .modal(true)
+    .message(title)
+    .detail(message)
+    .buttons(["OK"])
+    .build();
+  dialog.show(Some(window));
+}
 
 const UNKNOWN: &str = "(Unknown)";
 

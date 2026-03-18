@@ -1,18 +1,18 @@
 use crate::grid_cell::Entry;
 use crate::gtk_helpers::{get_cell, setup_col, str_or_unknown};
 use crate::video_widget::open_in_browser;
-use crate::playback_controller::{PlaybackController, PlaybackSource};
+use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
 use fml9000_core::{
   get_playlist_items, reorder_playlist_items, remove_from_playlist, MediaItem,
   PlaylistItemIdentifier,
 };
-use gtk::gdk::{self, Key};
+use gtk::gdk;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
 use gtk::prelude::*;
 use gtk::{
-  ColumnView, ColumnViewColumn, CustomSorter, DragSource, DropTarget, EventControllerKey,
+  ColumnView, ColumnViewColumn, CustomSorter, DragSource, DropTarget,
   GestureClick, MultiSelection, PopoverMenu, ScrolledWindow, SignalListItemFactory, SortListModel,
 };
 use std::cell::{Cell, RefCell};
@@ -435,56 +435,8 @@ pub fn create_playlist_view(
   });
   playlist_columnview.add_controller(drop_target);
 
-  let pc_for_keys = playback_controller.clone();
-  let key_controller = EventControllerKey::new();
-  key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-  key_controller.connect_key_pressed(move |_, key, _, _| {
-    match key {
-      Key::space => {
-        match pc_for_keys.playback_source() {
-          PlaybackSource::Local => {
-            if pc_for_keys.audio().is_playing() {
-              pc_for_keys.audio().pause();
-            } else {
-              pc_for_keys.audio().play();
-            }
-          }
-          PlaybackSource::YouTube => {
-            if pc_for_keys.video_widget().is_playing() {
-              pc_for_keys.video_widget().pause();
-            } else {
-              pc_for_keys.video_widget().unpause();
-            }
-          }
-          PlaybackSource::None => {}
-        }
-        gtk::glib::Propagation::Stop
-      }
-      Key::n | Key::N => {
-        pc_for_keys.play_next();
-        gtk::glib::Propagation::Stop
-      }
-      Key::p | Key::P => {
-        pc_for_keys.play_prev();
-        gtk::glib::Propagation::Stop
-      }
-      Key::s | Key::S => {
-        pc_for_keys.stop();
-        gtk::glib::Propagation::Stop
-      }
-      Key::r | Key::R => {
-        let enabled = !pc_for_keys.shuffle_enabled();
-        pc_for_keys.set_shuffle_enabled(enabled);
-        gtk::glib::Propagation::Stop
-      }
-      _ => gtk::glib::Propagation::Proceed,
-    }
-  });
-  playlist_columnview.add_controller(key_controller);
-
   let pc_for_activate = playback_controller.clone();
   let store_for_activate = playlist_store.clone();
-  let settings_for_activate = settings.clone();
   playlist_columnview.connect_activate(move |_columnview, pos| {
     if let Some(item) = store_for_activate.item(pos) {
       if let Ok(obj) = item.downcast::<BoxedAnyObject>() {
@@ -494,8 +446,7 @@ pub fn create_playlist_view(
               pc_for_activate.play_index(pos);
             }
             MediaItem::Video(video) => {
-              let audio_only = settings_for_activate.borrow().youtube_audio_only;
-              pc_for_activate.play_youtube_video(&video, audio_only);
+              pc_for_activate.play_youtube_video(&video);
             }
           }
         }
@@ -536,7 +487,7 @@ pub fn create_playlist_view(
   let play_audio = gtk::gio::SimpleAction::new("play-audio", None);
   play_audio.connect_activate(move |_, _| {
     if let Some(MediaItem::Video(video)) = ci.borrow().as_ref() {
-      pc.play_youtube_video(video, true);
+      pc.play_youtube_video(video);
     }
   });
   action_group.add_action(&play_audio);
@@ -546,7 +497,7 @@ pub fn create_playlist_view(
   let play_video = gtk::gio::SimpleAction::new("play-video", None);
   play_video.connect_activate(move |_, _| {
     if let Some(MediaItem::Video(video)) = ci.borrow().as_ref() {
-      pc.play_youtube_video(video, false);
+      pc.play_youtube_video(video);
     }
   });
   action_group.add_action(&play_video);

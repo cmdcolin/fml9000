@@ -11,7 +11,7 @@ use lofty::probe::Probe;
 use lofty::tag::ItemKey;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use walkdir::WalkDir;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations");
@@ -24,7 +24,12 @@ pub struct Facet {
   pub all: bool,
 }
 
-fn get_database_url() -> Result<String, String> {
+static DATABASE_URL: OnceLock<String> = OnceLock::new();
+
+fn get_database_url() -> Result<&'static str, String> {
+  if let Some(url) = DATABASE_URL.get() {
+    return Ok(url.as_str());
+  }
   let proj_dirs =
     get_project_dirs().ok_or_else(|| "Could not determine config directory".to_string())?;
   let config_dir = proj_dirs.config_dir();
@@ -34,14 +39,21 @@ fn get_database_url() -> Result<String, String> {
   let path_str = path
     .to_str()
     .ok_or_else(|| "Database path contains invalid UTF-8".to_string())?;
-  Ok(format!("sqlite://{}", path_str))
+  let url = format!("sqlite://{}", path_str);
+  let _ = DATABASE_URL.set(url);
+  Ok(DATABASE_URL.get().unwrap().as_str())
 }
 
-/// Initialize the database and run migrations. Call once at startup.
+fn configure_connection(conn: &mut SqliteConnection) {
+  let _ = diesel::sql_query("PRAGMA journal_mode=WAL;").execute(conn);
+  let _ = diesel::sql_query("PRAGMA busy_timeout=5000;").execute(conn);
+}
+
 pub fn init_db() -> Result<(), String> {
   let database_url = get_database_url()?;
-  let mut conn = SqliteConnection::establish(&database_url)
+  let mut conn = SqliteConnection::establish(database_url)
     .map_err(|e| format!("Error connecting to database: {e}"))?;
+  configure_connection(&mut conn);
   conn
     .run_pending_migrations(MIGRATIONS)
     .map_err(|e| format!("Failed to run migrations: {e}"))?;
@@ -52,15 +64,14 @@ thread_local! {
   static DB_CONNECTION: RefCell<Option<SqliteConnection>> = const { RefCell::new(None) };
 }
 
-/// Get a database connection. Uses a cached thread-local connection.
 pub fn connect_db() -> Result<SqliteConnection, String> {
   let database_url = get_database_url()?;
-  SqliteConnection::establish(&database_url)
-    .map_err(|e| format!("Error connecting to database: {e}"))
+  let mut conn = SqliteConnection::establish(database_url)
+    .map_err(|e| format!("Error connecting to database: {e}"))?;
+  configure_connection(&mut conn);
+  Ok(conn)
 }
 
-/// Execute a database operation using a cached thread-local connection.
-/// This avoids opening a new connection for each operation.
 pub fn with_db<T, F>(f: F) -> Result<T, String>
 where
   F: FnOnce(&mut SqliteConnection) -> Result<T, String>,
@@ -69,8 +80,9 @@ where
     let mut conn_opt = cell.borrow_mut();
     if conn_opt.is_none() {
       let database_url = get_database_url()?;
-      let conn = SqliteConnection::establish(&database_url)
+      let mut conn = SqliteConnection::establish(database_url)
         .map_err(|e| format!("Error connecting to database: {e}"))?;
+      configure_connection(&mut conn);
       *conn_opt = Some(conn);
     }
     f(conn_opt.as_mut().unwrap())
@@ -78,17 +90,12 @@ where
 }
 
 
-/// Progress update sent during scanning
 #[derive(Clone)]
 pub enum ScanProgress {
-  /// Starting to scan a folder
-  StartingFolder(String),
-  /// Found a file (total_found, skipped, current_file)
-  FoundFile(usize, usize, String),
-  /// Scanned a file (total_found, skipped, added, updated, current_file)
-  ScannedFile(usize, usize, usize, usize, String),
-  /// Scan complete (total_found, skipped, added, updated, stale_files)
-  Complete(usize, usize, usize, usize, Vec<String>),
+  StartingFolder { folder: String },
+  FoundFile { total_found: usize, skipped: usize, current_file: String },
+  ScannedFile { total_found: usize, skipped: usize, added: usize, updated: usize, current_file: String },
+  Complete { total_found: usize, skipped: usize, added: usize, updated: usize, stale_files: Vec<String> },
 }
 
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -103,9 +110,6 @@ fn is_audio_file(path: &std::path::Path) -> bool {
     .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
 }
 
-/// Run scan with progress reporting via a channel
-/// - existing_complete: files that exist and have all metadata (will be skipped)
-/// - existing_incomplete: files that exist but need metadata update (e.g., missing duration)
 pub fn run_scan_with_progress(
   folders: Vec<String>,
   existing_complete: std::collections::HashSet<String>,
@@ -118,7 +122,7 @@ pub fn run_scan_with_progress(
     Ok(c) => c,
     Err(e) => {
       eprintln!("Warning: Could not connect to database for scanning: {e}");
-      let _ = progress_sender.send(ScanProgress::Complete(0, 0, 0, 0, Vec::new()));
+      let _ = progress_sender.send(ScanProgress::Complete { total_found: 0, skipped: 0, added: 0, updated: 0, stale_files: Vec::new() });
       return;
     }
   };
@@ -129,7 +133,7 @@ pub fn run_scan_with_progress(
   let mut total_updated = 0;
 
   for folder in &folders {
-    let _ = progress_sender.send(ScanProgress::StartingFolder(folder.clone()));
+    let _ = progress_sender.send(ScanProgress::StartingFolder { folder: folder.clone() });
 
     let walker = WalkDir::new(folder)
       .follow_links(false)
@@ -157,9 +161,8 @@ pub fn run_scan_with_progress(
       };
       total_found += 1;
 
-      let _ = progress_sender.send(ScanProgress::FoundFile(total_found, total_skipped, path_str.clone()));
+      let _ = progress_sender.send(ScanProgress::FoundFile { total_found, skipped: total_skipped, current_file: path_str.clone() });
 
-      // Skip files that are complete
       if existing_complete.contains(&path_str) {
         total_skipped += 1;
         continue;
@@ -189,7 +192,6 @@ pub fn run_scan_with_progress(
         .ok();
 
       if needs_update {
-        // Update existing record with duration
         if let Err(e) = diesel::update(dsl::tracks.filter(dsl::filename.eq(&path_str)))
           .set(dsl::duration_seconds.eq(duration_seconds))
           .execute(&mut conn)
@@ -231,11 +233,10 @@ pub fn run_scan_with_progress(
         }
       }
 
-      let _ = progress_sender.send(ScanProgress::ScannedFile(total_found, total_skipped, total_added, total_updated, path_str));
+      let _ = progress_sender.send(ScanProgress::ScannedFile { total_found, skipped: total_skipped, added: total_added, updated: total_updated, current_file: path_str });
     }
   }
 
-  // Detect stale tracks: files in DB that no longer exist on disk
   let all_db_files: Vec<String> = dsl::tracks
     .select(dsl::filename)
     .load::<String>(&mut conn)
@@ -250,21 +251,16 @@ pub fn run_scan_with_progress(
     })
     .collect();
 
-  let _ = progress_sender.send(ScanProgress::Complete(total_found, total_skipped, total_added, total_updated, stale_files));
+  let _ = progress_sender.send(ScanProgress::Complete { total_found, skipped: total_skipped, added: total_added, updated: total_updated, stale_files });
 }
 
 pub fn delete_tracks_by_filename(filenames: &[String]) -> Result<usize, String> {
   use crate::schema::tracks::dsl;
 
   with_db(|conn| {
-    let mut deleted = 0;
-    for filename in filenames {
-      let count = diesel::delete(dsl::tracks.filter(dsl::filename.eq(filename)))
-        .execute(conn)
-        .map_err(|e| format!("Failed to delete track {filename}: {e}"))?;
-      deleted += count;
-    }
-    Ok(deleted)
+    diesel::delete(dsl::tracks.filter(dsl::filename.eq_any(filenames)))
+      .execute(conn)
+      .map_err(|e| format!("Failed to delete tracks: {e}"))
   })
 }
 
@@ -329,12 +325,16 @@ pub fn load_recently_played_items(limit: i64) -> Vec<MediaItem> {
     let tracks_result: Vec<Track> = t::tracks
       .filter(t::last_played.is_not_null())
       .select(Track::as_select())
+      .order(t::last_played.desc())
+      .limit(limit)
       .load(conn)
       .unwrap_or_default();
 
     let videos: Vec<YouTubeVideo> = youtube_videos::table
       .filter(youtube_videos::last_played.is_not_null())
       .select(YouTubeVideo::as_select())
+      .order(youtube_videos::last_played.desc())
+      .limit(limit)
       .load(conn)
       .unwrap_or_default();
 
@@ -369,12 +369,14 @@ pub fn load_recently_added_items(limit: i64) -> Vec<MediaItem> {
     let tracks_result: Vec<Track> = t::tracks
       .select(Track::as_select())
       .order(t::added.desc())
+      .limit(limit)
       .load(conn)
       .unwrap_or_default();
 
     let videos: Vec<YouTubeVideo> = youtube_videos::table
       .select(YouTubeVideo::as_select())
       .order(youtube_videos::added.desc())
+      .limit(limit)
       .load(conn)
       .unwrap_or_default();
 
@@ -493,36 +495,23 @@ pub fn get_queue_items() -> Vec<MediaItem> {
   use crate::schema::{playback_queue, tracks, youtube_videos};
 
   with_db(|conn| {
-    let queue_with_tracks: Vec<(PlaybackQueueItem, Option<Track>)> = playback_queue::table
-      .left_join(tracks::table.on(playback_queue::track_filename.eq(tracks::filename.nullable())))
-      .select((PlaybackQueueItem::as_select(), Option::<Track>::as_select()))
-      .order(playback_queue::position.asc())
-      .load(conn)
-      .unwrap_or_default();
-
-    let queue_with_videos: Vec<(PlaybackQueueItem, Option<YouTubeVideo>)> = playback_queue::table
-      .left_join(youtube_videos::table.on(playback_queue::youtube_video_id.eq(youtube_videos::id.nullable())))
-      .select((PlaybackQueueItem::as_select(), Option::<YouTubeVideo>::as_select()))
+    let rows: Vec<(PlaybackQueueItem, Option<Track>, Option<YouTubeVideo>)> = playback_queue::table
+      .left_join(tracks::table)
+      .left_join(youtube_videos::table)
+      .select((PlaybackQueueItem::as_select(), Option::<Track>::as_select(), Option::<YouTubeVideo>::as_select()))
       .order(playback_queue::position.asc())
       .load(conn)
       .unwrap_or_default();
 
     let mut result = Vec::new();
-
-    for (queue_item, track_opt) in queue_with_tracks {
+    for (_queue_item, track_opt, video_opt) in rows {
       if let Some(track) = track_opt {
-        result.push((queue_item.position, MediaItem::Track(Arc::new(track))));
+        result.push(MediaItem::Track(Arc::new(track)));
+      } else if let Some(video) = video_opt {
+        result.push(MediaItem::Video(Arc::new(video)));
       }
     }
-
-    for (queue_item, video_opt) in queue_with_videos {
-      if let Some(video) = video_opt {
-        result.push((queue_item.position, MediaItem::Video(Arc::new(video))));
-      }
-    }
-
-    result.sort_by_key(|(pos, _)| *pos);
-    Ok(result.into_iter().map(|(_, item)| item).collect())
+    Ok(result)
   })
   .unwrap_or_default()
 }
@@ -551,6 +540,31 @@ pub fn queue_len() -> usize {
       .map_err(|e| e.to_string())
   })
   .unwrap_or(0)
+}
+
+pub fn get_distinct_albums() -> Vec<Arc<Track>> {
+  use crate::schema::tracks::dsl;
+
+  with_db(|conn| {
+    let all_tracks: Vec<Track> = dsl::tracks
+      .order((dsl::album_artist.asc(), dsl::album.asc()))
+      .load::<Track>(conn)
+      .unwrap_or_default();
+
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for track in all_tracks {
+      let key = (
+        track.album_artist.clone().or(track.artist.clone()),
+        track.album.clone(),
+      );
+      if seen.insert(key) {
+        result.push(Arc::new(track));
+      }
+    }
+    Ok(result)
+  })
+  .unwrap_or_default()
 }
 
 pub fn load_tracks() -> Result<Vec<Arc<Track>>, String> {
@@ -681,21 +695,23 @@ pub fn add_youtube_videos(
   use crate::models::NewYouTubeVideo;
 
   with_db(|conn| {
-    for (video_id, title, duration, thumbnail, published_at) in videos {
-      if let Err(e) = diesel::insert_or_ignore_into(youtube_videos::table)
-        .values(NewYouTubeVideo {
-          video_id,
-          channel_id: db_channel_id,
-          title,
-          duration_seconds: *duration,
-          thumbnail_url: thumbnail.as_deref(),
-          published_at: *published_at,
-        })
-        .execute(conn)
-      {
-        eprintln!("Warning: Failed to insert video {video_id}: {e}");
-      }
-    }
+    let new_videos: Vec<NewYouTubeVideo> = videos
+      .iter()
+      .map(|(video_id, title, duration, thumbnail, published_at)| NewYouTubeVideo {
+        video_id,
+        channel_id: db_channel_id,
+        title,
+        duration_seconds: *duration,
+        thumbnail_url: thumbnail.as_deref(),
+        published_at: *published_at,
+      })
+      .collect();
+
+    diesel::insert_or_ignore_into(youtube_videos::table)
+      .values(&new_videos)
+      .execute(conn)
+      .map_err(|e| format!("Failed to insert videos: {e}"))?;
+
     Ok(())
   })
 }
@@ -824,38 +840,24 @@ pub fn add_to_playlist(playlist_id: i32, item: &MediaItem) -> Result<(), String>
 
 pub fn get_playlist_items(playlist_id: i32) -> Result<Vec<MediaItem>, String> {
   with_db(|conn| {
-    let items_with_tracks: Vec<(PlaylistTrack, Option<Track>)> = playlist_tracks::table
+    let rows: Vec<(PlaylistTrack, Option<Track>, Option<YouTubeVideo>)> = playlist_tracks::table
       .filter(playlist_tracks::playlist_id.eq(playlist_id))
-      .left_join(tracks::table.on(playlist_tracks::track_filename.eq(tracks::filename.nullable())))
-      .select((PlaylistTrack::as_select(), Option::<Track>::as_select()))
+      .left_join(tracks::table)
+      .left_join(youtube_videos::table)
+      .select((PlaylistTrack::as_select(), Option::<Track>::as_select(), Option::<YouTubeVideo>::as_select()))
       .order(playlist_tracks::position.asc())
       .load(conn)
       .map_err(|e| format!("Failed to load playlist items: {e}"))?;
 
-    let items_with_videos: Vec<(PlaylistTrack, Option<YouTubeVideo>)> = playlist_tracks::table
-      .filter(playlist_tracks::playlist_id.eq(playlist_id))
-      .left_join(youtube_videos::table.on(playlist_tracks::youtube_video_id.eq(youtube_videos::id.nullable())))
-      .select((PlaylistTrack::as_select(), Option::<YouTubeVideo>::as_select()))
-      .order(playlist_tracks::position.asc())
-      .load(conn)
-      .map_err(|e| format!("Failed to load playlist videos: {e}"))?;
-
-    let mut result: Vec<(i32, MediaItem)> = Vec::new();
-
-    for (playlist_item, track_opt) in items_with_tracks {
+    let mut result = Vec::new();
+    for (_playlist_item, track_opt, video_opt) in rows {
       if let Some(track) = track_opt {
-        result.push((playlist_item.position, MediaItem::Track(Arc::new(track))));
+        result.push(MediaItem::Track(Arc::new(track)));
+      } else if let Some(video) = video_opt {
+        result.push(MediaItem::Video(Arc::new(video)));
       }
     }
-
-    for (playlist_item, video_opt) in items_with_videos {
-      if let Some(video) = video_opt {
-        result.push((playlist_item.position, MediaItem::Video(Arc::new(video))));
-      }
-    }
-
-    result.sort_by_key(|(pos, _)| *pos);
-    Ok(result.into_iter().map(|(_, item)| item).collect())
+    Ok(result)
   })
 }
 
@@ -937,4 +939,244 @@ pub fn reorder_playlist_items(playlist_id: i32, items: &[PlaylistItemIdentifier]
     }
     Ok(())
   })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::path::Path;
+  use std::sync::Arc;
+
+  fn make_track(
+    filename: &str,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    album_artist: Option<&str>,
+  ) -> Arc<Track> {
+    Arc::new(Track {
+      filename: filename.to_string(),
+      title: title.map(str::to_string),
+      artist: artist.map(str::to_string),
+      album: album.map(str::to_string),
+      album_artist: album_artist.map(str::to_string),
+      track: None,
+      genre: None,
+      added: None,
+      duration_seconds: None,
+      play_count: 0,
+      last_played: None,
+    })
+  }
+
+  #[test]
+  fn is_audio_file_recognizes_common_formats() {
+    let extensions = [
+      "mp3", "flac", "ogg", "opus", "wav", "aac", "m4a", "wma", "aiff", "aif", "ape", "wv",
+      "mpc", "mp4", "webm",
+    ];
+    for ext in extensions {
+      assert!(
+        is_audio_file(Path::new(&format!("song.{ext}"))),
+        "{ext} should be recognized as audio"
+      );
+    }
+  }
+
+  #[test]
+  fn is_audio_file_case_insensitive() {
+    assert!(is_audio_file(Path::new("song.MP3")));
+    assert!(is_audio_file(Path::new("song.Flac")));
+    assert!(is_audio_file(Path::new("song.OGG")));
+  }
+
+  #[test]
+  fn is_audio_file_rejects_non_audio() {
+    assert!(!is_audio_file(Path::new("readme.txt")));
+    assert!(!is_audio_file(Path::new("image.png")));
+    assert!(!is_audio_file(Path::new("document.pdf")));
+    assert!(!is_audio_file(Path::new("code.rs")));
+    assert!(!is_audio_file(Path::new("data.json")));
+  }
+
+  #[test]
+  fn is_audio_file_no_extension() {
+    assert!(!is_audio_file(Path::new("Makefile")));
+    assert!(!is_audio_file(Path::new("/some/path/noext")));
+  }
+
+  #[test]
+  fn build_facets_empty_input() {
+    let facets = build_facets(&[]);
+    assert_eq!(facets.len(), 1);
+    assert!(facets[0].all);
+  }
+
+  #[test]
+  fn build_facets_first_entry_is_all() {
+    let tracks = vec![make_track("/a.mp3", Some("Song"), Some("Artist"), Some("Album"), None)];
+    let facets = build_facets(&tracks);
+    assert!(facets[0].all);
+    assert!(facets[0].album.is_none());
+    assert!(facets[0].album_artist.is_none());
+  }
+
+  #[test]
+  fn build_facets_deduplicates() {
+    let tracks = vec![
+      make_track("/a.mp3", Some("Song1"), Some("Artist"), Some("Album"), None),
+      make_track("/b.mp3", Some("Song2"), Some("Artist"), Some("Album"), None),
+    ];
+    let facets = build_facets(&tracks);
+    assert_eq!(facets.len(), 2);
+  }
+
+  #[test]
+  fn build_facets_multiple_albums() {
+    let tracks = vec![
+      make_track("/a.mp3", None, Some("Artist"), Some("Album1"), None),
+      make_track("/b.mp3", None, Some("Artist"), Some("Album2"), None),
+    ];
+    let facets = build_facets(&tracks);
+    assert_eq!(facets.len(), 3);
+  }
+
+  #[test]
+  fn build_facets_uses_album_artist_over_artist() {
+    let tracks = vec![make_track(
+      "/a.mp3",
+      None,
+      Some("Track Artist"),
+      Some("Album"),
+      Some("Album Artist"),
+    )];
+    let facets = build_facets(&tracks);
+    let non_all = &facets[1];
+    assert_eq!(
+      non_all.album_artist_or_artist.as_deref(),
+      Some("Album Artist")
+    );
+    assert_eq!(non_all.album_artist.as_deref(), Some("Album Artist"));
+  }
+
+  #[test]
+  fn build_facets_falls_back_to_artist_when_no_album_artist() {
+    let tracks = vec![make_track("/a.mp3", None, Some("Artist"), Some("Album"), None)];
+    let facets = build_facets(&tracks);
+    let non_all = &facets[1];
+    assert_eq!(non_all.album_artist_or_artist.as_deref(), Some("Artist"));
+    assert!(non_all.album_artist.is_none());
+  }
+
+  #[test]
+  fn build_facets_sorted() {
+    let tracks = vec![
+      make_track("/a.mp3", None, Some("Zebra"), Some("Z Album"), None),
+      make_track("/b.mp3", None, Some("Alpha"), Some("A Album"), None),
+    ];
+    let facets = build_facets(&tracks);
+    assert!(facets[0].all);
+    let albums: Vec<Option<&str>> = facets[1..].iter().map(|f| f.album.as_deref()).collect();
+    assert_eq!(albums, vec![Some("A Album"), Some("Z Album")]);
+  }
+
+  #[test]
+  fn build_facets_handles_none_fields() {
+    let tracks = vec![make_track("/a.mp3", None, None, None, None)];
+    let facets = build_facets(&tracks);
+    assert_eq!(facets.len(), 2);
+    let non_all = &facets[1];
+    assert!(non_all.album.is_none());
+    assert!(non_all.album_artist.is_none());
+    assert!(non_all.album_artist_or_artist.is_none());
+  }
+
+  #[test]
+  fn scan_progress_starting_folder() {
+    let p = ScanProgress::StartingFolder {
+      folder: "/music".to_string(),
+    };
+    if let ScanProgress::StartingFolder { folder } = p {
+      assert_eq!(folder, "/music");
+    } else {
+      panic!("expected StartingFolder variant");
+    }
+  }
+
+  #[test]
+  fn scan_progress_found_file() {
+    let p = ScanProgress::FoundFile {
+      total_found: 5,
+      skipped: 2,
+      current_file: "song.mp3".to_string(),
+    };
+    if let ScanProgress::FoundFile {
+      total_found,
+      skipped,
+      current_file,
+    } = p
+    {
+      assert_eq!(total_found, 5);
+      assert_eq!(skipped, 2);
+      assert_eq!(current_file, "song.mp3");
+    } else {
+      panic!("expected FoundFile variant");
+    }
+  }
+
+  #[test]
+  fn scan_progress_complete() {
+    let stale = vec!["/old/file.mp3".to_string()];
+    let p = ScanProgress::Complete {
+      total_found: 100,
+      skipped: 10,
+      added: 80,
+      updated: 10,
+      stale_files: stale.clone(),
+    };
+    if let ScanProgress::Complete {
+      total_found,
+      skipped,
+      added,
+      updated,
+      stale_files,
+    } = p
+    {
+      assert_eq!(total_found, 100);
+      assert_eq!(skipped, 10);
+      assert_eq!(added, 80);
+      assert_eq!(updated, 10);
+      assert_eq!(stale_files, stale);
+    } else {
+      panic!("expected Complete variant");
+    }
+  }
+
+  #[test]
+  fn scan_progress_clone() {
+    let p = ScanProgress::ScannedFile {
+      total_found: 1,
+      skipped: 0,
+      added: 1,
+      updated: 0,
+      current_file: "test.flac".to_string(),
+    };
+    let p2 = p.clone();
+    if let ScanProgress::ScannedFile { current_file, .. } = p2 {
+      assert_eq!(current_file, "test.flac");
+    }
+  }
+
+  #[test]
+  fn facet_derives() {
+    let f = Facet {
+      album: Some("A".to_string()),
+      album_artist: None,
+      album_artist_or_artist: Some("B".to_string()),
+      all: false,
+    };
+    let f2 = f.clone();
+    assert_eq!(f, f2);
+    assert_eq!(format!("{:?}", f), format!("{:?}", f2));
+  }
 }

@@ -1,3 +1,5 @@
+mod browse_card;
+mod browse_view;
 mod facet_box;
 mod grid_cell;
 mod gtk_helpers;
@@ -21,7 +23,8 @@ use gtk::gio::ListStore;
 use gtk::glib;
 use gtk::glib::BoxedAnyObject;
 use gtk::gdk::Key;
-use gtk::{AlertDialog, ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Label, Notebook, Orientation, Paned, Picture, Stack};
+use gtk::{ApplicationWindow, ContentFit, CustomFilter, EventControllerKey, Label, Notebook, Orientation, Paned, Picture, Stack};
+use gtk_helpers::show_error_dialog;
 use video_widget::VideoWidget;
 use header_bar::create_header_bar;
 use playback_controller::{PlaybackController, PlaybackSource};
@@ -31,16 +34,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 const APP_ID: &str = "com.github.fml9000";
-
-fn show_error_dialog(window: &ApplicationWindow, title: &str, message: &str) {
-  let dialog = AlertDialog::builder()
-    .modal(true)
-    .message(title)
-    .detail(message)
-    .buttons(["OK"])
-    .build();
-  dialog.show(Some(window));
-}
 
 fn main() {
   let app = Application::builder().application_id(APP_ID).build();
@@ -146,7 +139,7 @@ fn app_main(application: &Application) {
     let window_for_scan = Rc::clone(&window);
     glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
       while let Ok(progress) = rx.try_recv() {
-        if let ScanProgress::Complete(_found, _skipped, added, updated, stale_files) = progress {
+        if let ScanProgress::Complete { added, updated, stale_files, .. } = progress {
           if added > 0 || updated > 0 {
             if let Ok(fresh_tracks) = load_tracks() {
               playlist_store_for_scan.remove_all();
@@ -334,6 +327,9 @@ fn app_main(application: &Application) {
   notebook.append_page(&main_pane, Some(&Label::new(Some("Main"))));
   notebook.append_page(&art_tab_stack, Some(&Label::new(Some("Art"))));
 
+  let browse_tab = browse_view::create_browse_view(Rc::clone(&playback_controller), Rc::clone(&settings));
+  notebook.append_page(&browse_tab, Some(&Label::new(Some("Browse"))));
+
   let main_ui = gtk::Box::new(Orientation::Vertical, 0);
   let header = create_header_bar(
     Rc::clone(&settings),
@@ -350,7 +346,17 @@ fn app_main(application: &Application) {
   let pc_for_keys = Rc::clone(&playback_controller);
   let key_controller = EventControllerKey::new();
   key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+  let window_for_keys = Rc::clone(&window);
   key_controller.connect_key_pressed(move |_, key, _, _| {
+    if let Some(focus) = gtk::prelude::GtkWindowExt::focus(&*window_for_keys) {
+      if focus.is::<gtk::Text>()
+        || focus.is::<gtk::TextView>()
+        || focus.is::<gtk::SearchEntry>()
+        || focus.is::<gtk::Entry>()
+      {
+        return gtk::glib::Propagation::Proceed;
+      }
+    }
     match key {
       Key::space => {
         match pc_for_keys.playback_source() {

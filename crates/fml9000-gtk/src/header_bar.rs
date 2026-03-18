@@ -1,7 +1,7 @@
 use crate::playback_controller::{PlaybackController, PlaybackSource};
 use crate::settings::{FmlSettings, RepeatMode};
 use adw::prelude::*;
-use fml9000_core::Track;
+use fml9000_core::{format_duration_secs, Track};
 use gtk::glib::{self, ControlFlow, MainContext};
 use gtk::{Adjustment, Button, Label, Orientation, Scale, ScaleButton, ToggleButton};
 use std::cell::{Cell, RefCell};
@@ -10,10 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn format_time(duration: Duration) -> String {
-  let total_secs = duration.as_secs();
-  let mins = total_secs / 60;
-  let secs = total_secs % 60;
-  format!("{mins}:{secs:02}")
+  format_duration_secs(duration.as_secs() as i32)
 }
 
 fn repeat_mode_icon(mode: RepeatMode) -> &'static str {

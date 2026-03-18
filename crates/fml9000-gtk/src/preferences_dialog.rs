@@ -394,17 +394,17 @@ pub async fn dialog(
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
       while let Ok(progress) = rx.try_recv() {
         match progress {
-          ScanProgress::StartingFolder(folder) => {
+          ScanProgress::StartingFolder { folder } => {
             status_label_clone.set_label(&format!("Scanning: {}", folder));
           }
-          ScanProgress::FoundFile(found, skipped, file) => {
+          ScanProgress::FoundFile { total_found: found, skipped, current_file: file } => {
             progress_bar_clone.pulse();
             progress_bar_clone.set_text(Some(&format!("Found {} files ({} existing)...", found, skipped)));
             if let Some(name) = std::path::Path::new(&file).file_name() {
               file_label_clone.set_label(&name.to_string_lossy());
             }
           }
-          ScanProgress::ScannedFile(found, skipped, added, updated, file) => {
+          ScanProgress::ScannedFile { total_found: found, skipped, added, updated, current_file: file } => {
             if updated > 0 {
               progress_bar_clone.set_text(Some(&format!("{} files, {} skip, {} new, {} updated", found, skipped, added, updated)));
             } else {
@@ -414,7 +414,7 @@ pub async fn dialog(
               file_label_clone.set_label(&name.to_string_lossy());
             }
           }
-          ScanProgress::Complete(found, skipped, added, updated, stale_files) => {
+          ScanProgress::Complete { total_found: found, skipped, added, updated, stale_files } => {
             if updated > 0 {
               status_label_clone.set_label(&format!(
                 "Complete: {} found, {} existing, {} added, {} updated",

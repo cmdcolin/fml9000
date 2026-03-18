@@ -7,6 +7,7 @@ use fml9000_core::{
     create_playlist, add_to_playlist, delete_playlist,
     rename_playlist, load_video_by_video_id,
     add_youtube_channel, add_youtube_videos,
+    compute_next_index, compute_prev_index, NextTrackResult,
 };
 use fml9000_core::youtube::{fetch_channel_info, ChannelInfo, VideoInfo};
 use fml9000_core::settings::{AppState, CoreSettings, RepeatMode, read_state, write_state};
@@ -711,7 +712,6 @@ impl App {
     }
 
     pub fn play_next(&mut self) {
-        // Check queue first
         if queue_len() > 0 {
             if let Some(item) = pop_queue_front() {
                 self.play_item(&item);
@@ -719,60 +719,36 @@ impl App {
             }
         }
 
-        if self.repeat_mode == RepeatMode::One {
-            if let Some(ref np) = self.now_playing {
-                self.play_track(np.track.clone());
-                return;
+        match compute_next_index(
+            self.current_playing_index(),
+            self.displayed_items.len(),
+            self.shuffle_enabled,
+            self.repeat_mode,
+        ) {
+            NextTrackResult::PlayIndex(idx) => {
+                if let Some(item) = self.displayed_items.get(idx).cloned() {
+                    self.play_item(&item);
+                    self.track_state.select(Some(idx));
+                }
             }
-            if let Some(ref npv) = self.now_playing_video {
-                self.play_youtube(npv.video.clone());
-                return;
-            }
-        }
-
-        if let Some(current_idx) = self.current_playing_index() {
-            let len = self.displayed_items.len();
-            if len == 0 {
-                return;
-            }
-
-            let next_idx = if self.shuffle_enabled {
-                use rand::RngExt;
-                let mut rng = rand::rng();
-                rng.random_range(0..len)
-            } else if current_idx + 1 < len {
-                current_idx + 1
-            } else if self.repeat_mode == RepeatMode::All {
-                0
-            } else {
+            NextTrackResult::Stop => {
                 self.now_playing = None;
-                return;
-            };
-
-            if let Some(item) = self.displayed_items.get(next_idx).cloned() {
-                self.play_item(&item);
-                self.track_state.select(Some(next_idx));
             }
         }
     }
 
     pub fn play_prev(&mut self) {
-        if let Some(current_idx) = self.current_playing_index() {
-            let len = self.displayed_items.len();
-            if len == 0 {
-                return;
+        match compute_prev_index(
+            self.current_playing_index(),
+            self.displayed_items.len(),
+        ) {
+            NextTrackResult::PlayIndex(idx) => {
+                if let Some(item) = self.displayed_items.get(idx).cloned() {
+                    self.play_item(&item);
+                    self.track_state.select(Some(idx));
+                }
             }
-
-            let prev_idx = if current_idx > 0 {
-                current_idx - 1
-            } else {
-                len - 1
-            };
-
-            if let Some(item) = self.displayed_items.get(prev_idx).cloned() {
-                self.play_item(&item);
-                self.track_state.select(Some(prev_idx));
-            }
+            NextTrackResult::Stop => {}
         }
     }
 

@@ -25,10 +25,6 @@ where
   }
 }
 
-fn default_true() -> bool {
-  true
-}
-
 fn default_fetch_limit() -> usize {
   100
 }
@@ -50,8 +46,6 @@ pub struct CoreSettings {
   pub volume: f64,
   #[serde(default)]
   pub rescan_on_startup: bool,
-  #[serde(default = "default_true")]
-  pub youtube_audio_only: bool,
   #[serde(default = "default_fetch_limit")]
   pub youtube_fetch_limit: usize,
   #[serde(default)]
@@ -66,7 +60,6 @@ impl Default for CoreSettings {
       folders: Vec::new(),
       volume: 1.0,
       rescan_on_startup: false,
-      youtube_audio_only: true,
       youtube_fetch_limit: 100,
       shuffle_enabled: false,
       repeat_mode: RepeatMode::All,
@@ -161,38 +154,28 @@ pub fn read_state() -> AppState {
   }
 }
 
-pub fn write_state(state: &AppState) -> Result<(), String> {
+fn write_toml_file<T: Serialize>(data: &T, filename: &str) -> Result<(), String> {
   let proj_dirs = get_project_dirs().ok_or("Could not determine config directory")?;
-  let path = proj_dirs.config_dir();
+  let dir = proj_dirs.config_dir();
 
-  std::fs::create_dir_all(path).map_err(|e| format!("Failed to create config directory: {e}"))?;
+  std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create config directory: {e}"))?;
 
-  let toml = toml::to_string(state).map_err(|e| format!("Failed to serialize state: {e}"))?;
+  let toml = toml::to_string(data).map_err(|e| format!("Failed to serialize {filename}: {e}"))?;
 
   let mut f = std::fs::OpenOptions::new()
     .create(true)
     .truncate(true)
     .write(true)
-    .open(path.join("state.toml"))
-    .map_err(|e| format!("Failed to open state file: {e}"))?;
+    .open(dir.join(filename))
+    .map_err(|e| format!("Failed to open {filename}: {e}"))?;
 
-  write!(f, "{}", toml).map_err(|e| format!("Failed to write state file: {e}"))
+  write!(f, "{}", toml).map_err(|e| format!("Failed to write {filename}: {e}"))
+}
+
+pub fn write_state(state: &AppState) -> Result<(), String> {
+  write_toml_file(state, "state.toml")
 }
 
 pub fn write_settings<T: Serialize>(settings: &T) -> Result<(), String> {
-  let proj_dirs = get_project_dirs().ok_or("Could not determine config directory")?;
-  let path = proj_dirs.config_dir();
-
-  std::fs::create_dir_all(path).map_err(|e| format!("Failed to create config directory: {e}"))?;
-
-  let toml = toml::to_string(&settings).map_err(|e| format!("Failed to serialize settings: {e}"))?;
-
-  let mut f = std::fs::OpenOptions::new()
-    .create(true)
-    .truncate(true)
-    .write(true)
-    .open(path.join("config.toml"))
-    .map_err(|e| format!("Failed to open config file: {e}"))?;
-
-  write!(f, "{}", toml).map_err(|e| format!("Failed to write config file: {e}"))
+  write_toml_file(settings, "config.toml")
 }

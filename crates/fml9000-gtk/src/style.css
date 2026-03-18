@@ -17,3 +17,16 @@
 .repeat-active {
   color: @accent_color;
 }
+
+.browse-card {
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.browse-card:hover {
+  background: alpha(currentColor, 0.05);
+}
+
+.browse-source-list {
+  background: transparent;
+}

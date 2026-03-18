@@ -91,7 +91,6 @@ impl VideoWidget {
     }
 
     pub fn play_youtube(self: &Rc<Self>, video_id: &str) {
-        eprintln!("VideoWidget::play_youtube() with video_id: {video_id}");
 
         // Show loading state
         self.show_loading();
@@ -128,7 +127,6 @@ impl VideoWidget {
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
             match receiver.try_recv() {
                 Ok(Ok(stream_url)) => {
-                    eprintln!("Got stream URL: {}", &stream_url[..stream_url.len().min(100)]);
                     widget.play(&stream_url);
                     glib::ControlFlow::Break
                 }

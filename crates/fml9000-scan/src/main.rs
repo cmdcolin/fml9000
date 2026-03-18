@@ -94,14 +94,14 @@ fn run_scan(folders: Vec<String>) {
 
     for progress in rx {
         match progress {
-            ScanProgress::StartingFolder(folder) => {
+            ScanProgress::StartingFolder { folder } => {
                 println!("Scanning: {folder}");
             }
-            ScanProgress::FoundFile(found, skipped, _file) => {
+            ScanProgress::FoundFile { total_found: found, skipped, .. } => {
                 print!("\r  Found {found} files ({skipped} existing)...");
                 let _ = io::stdout().flush();
             }
-            ScanProgress::ScannedFile(found, skipped, added, updated, _file) => {
+            ScanProgress::ScannedFile { total_found: found, skipped, added, updated, .. } => {
                 if updated > 0 {
                     print!("\r  {found} files, {skipped} existing, {added} new, {updated} updated");
                 } else {
@@ -109,7 +109,7 @@ fn run_scan(folders: Vec<String>) {
                 }
                 let _ = io::stdout().flush();
             }
-            ScanProgress::Complete(found, skipped, added, updated, stale_files) => {
+            ScanProgress::Complete { total_found: found, skipped, added, updated, stale_files } => {
                 println!();
                 println!();
                 println!("Scan complete:");

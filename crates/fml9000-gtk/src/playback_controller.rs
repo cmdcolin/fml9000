@@ -1,26 +1,26 @@
-use crate::gtk_helpers::str_or_unknown;
+use crate::gtk_helpers::{show_error_dialog, str_or_unknown};
 use crate::settings::RepeatMode;
 use crate::video_widget::VideoWidget;
 use fml9000_core::AudioPlayer;
 use fml9000_core::{
-  add_to_queue, load_track_by_filename, load_video_by_id, mark_as_played, pop_queue_front,
-  queue_len, remove_from_queue, update_play_stats, MediaItem,
+  add_to_queue, compute_next_index, compute_prev_index, load_track_by_filename, load_video_by_id,
+  mark_as_played, pop_queue_front, queue_len, remove_from_queue, update_play_stats, MediaItem,
+  NextTrackResult,
 };
 use fml9000_core::{Track, YouTubeVideo};
 use gtk::gdk;
 use gtk::gio::ListStore;
 use gtk::glib::{Bytes, BoxedAnyObject};
 use gtk::prelude::*;
-use gtk::{AlertDialog, ApplicationWindow, Picture, Stack};
+use gtk::{ApplicationWindow, Picture, Stack};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
-use rand::RngExt;
 use rodio::source::Source;
 use rodio::Decoder;
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -110,13 +110,7 @@ impl PlaybackController {
   }
 
   fn show_error(&self, title: &str, message: &str) {
-    let dialog = AlertDialog::builder()
-      .modal(true)
-      .message(title)
-      .detail(message)
-      .buttons(["OK"])
-      .build();
-    dialog.show(Some(&*self.window));
+    show_error_dialog(&self.window, title, message);
   }
 
   pub fn play_index(&self, index: u32) -> bool {
@@ -127,7 +121,7 @@ impl PlaybackController {
     let result = match &item {
       MediaItem::Track(track) => self.play_track(index, track),
       MediaItem::Video(video) => {
-        self.play_youtube_video(video, true);
+        self.play_youtube_video(video);
         self.current_index.set(Some(index));
         true
       }
@@ -188,10 +182,9 @@ impl PlaybackController {
     self.refresh_playlist_view();
 
     if !self.try_set_embedded_cover_art(&filename) {
-      let mut cover_path = PathBuf::from(&filename);
-      cover_path.pop();
-      cover_path.push("cover.jpg");
-      self.album_art.set_filename(Some(cover_path));
+      let mut track_dir = PathBuf::from(&filename);
+      track_dir.pop();
+      self.try_set_folder_cover_art(&track_dir);
     }
 
     self.window.set_title(Some(&format!(
@@ -232,14 +225,28 @@ impl PlaybackController {
 
   pub fn show_track_album_art(&self, track: &Track) {
     if !self.try_set_embedded_cover_art(&track.filename) {
-      let mut cover_path = PathBuf::from(&track.filename);
-      cover_path.pop();
-      cover_path.push("cover.jpg");
-      self.album_art.set_filename(Some(cover_path));
+      let mut track_dir = PathBuf::from(&track.filename);
+      track_dir.pop();
+      self.try_set_folder_cover_art(&track_dir);
     }
   }
 
-  pub fn play_youtube_video(&self, video: &YouTubeVideo, _audio_only: bool) {
+  fn try_set_folder_cover_art(&self, track_dir: &Path) -> bool {
+    const COVER_FILENAMES: &[&str] = &[
+      "cover.jpg", "cover.png", "folder.jpg", "folder.png",
+      "album.jpg", "album.png", "front.jpg", "front.png",
+    ];
+    for name in COVER_FILENAMES {
+      let path = track_dir.join(name);
+      if path.exists() {
+        self.album_art.set_filename(Some(path));
+        return true;
+      }
+    }
+    false
+  }
+
+  pub fn play_youtube_video(&self, video: &YouTubeVideo) {
     self.audio.stop();
     self.playback_source.set(PlaybackSource::YouTube);
     self.media_stack.set_visible_child_name("video");
@@ -434,71 +441,39 @@ impl PlaybackController {
   }
 
   pub fn play_next(&self) -> bool {
-    // Check queue first
     if queue_len() > 0 {
       return self.play_from_queue();
     }
 
-    let len = self.playlist_len();
-    if len == 0 {
-      return false;
+    match compute_next_index(
+      self.current_index.get().map(|i| i as usize),
+      self.playlist_len() as usize,
+      self.shuffle_enabled.get(),
+      self.repeat_mode.get(),
+    ) {
+      NextTrackResult::PlayIndex(idx) => self.play_index(idx as u32),
+      NextTrackResult::Stop => false,
     }
+  }
 
-    // Repeat One: replay the same track
-    if self.repeat_mode.get() == RepeatMode::One {
-      if let Some(idx) = self.current_index.get() {
-        return self.play_index(idx);
+  pub fn play_media_item(&self, item: &MediaItem) {
+    match item {
+      MediaItem::Track(track) => {
+        self.play_track(0, track);
+      }
+      MediaItem::Video(video) => {
+        self.play_youtube_video(video);
       }
     }
-
-    let next_index = if self.shuffle_enabled.get() {
-      // Shuffle: pick random, but avoid same track if possible
-      let mut rng = rand::rng();
-      if len == 1 {
-        0
-      } else {
-        loop {
-          let idx = rng.random_range(0..len);
-          if Some(idx) != self.current_index.get() {
-            break idx;
-          }
-        }
-      }
-    } else {
-      match self.current_index.get() {
-        Some(idx) => {
-          if idx + 1 < len {
-            idx + 1
-          } else if self.repeat_mode.get() == RepeatMode::All {
-            0 // Wrap around
-          } else {
-            return false; // Stop at end when repeat is off
-          }
-        }
-        None => 0,
-      }
-    };
-
-    self.play_index(next_index)
   }
 
   pub fn play_prev(&self) -> bool {
-    let len = self.playlist_len();
-    if len == 0 {
-      return false;
+    match compute_prev_index(
+      self.current_index.get().map(|i| i as usize),
+      self.playlist_len() as usize,
+    ) {
+      NextTrackResult::PlayIndex(idx) => self.play_index(idx as u32),
+      NextTrackResult::Stop => false,
     }
-
-    let prev_index = match self.current_index.get() {
-      Some(idx) => {
-        if idx > 0 {
-          idx - 1
-        } else {
-          len - 1
-        }
-      }
-      None => 0,
-    };
-
-    self.play_index(prev_index)
   }
 }
