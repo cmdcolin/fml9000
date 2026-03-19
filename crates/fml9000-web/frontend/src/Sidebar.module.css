@@ -1,0 +1,63 @@
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.loading {
+  padding: 16px;
+  color: var(--text-dim);
+}
+
+.section {
+  margin-bottom: 4px;
+}
+
+.sectionHeader {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.addBtn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.addBtn:hover {
+  color: var(--accent);
+}
+
+.item {
+  padding: 4px 16px 4px 24px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  border-radius: 4px;
+  margin: 0 4px;
+}
+
+.item:hover {
+  background: var(--bg-hover);
+}
+
+.itemActive {
+  background: var(--bg-active);
+  color: var(--accent);
+}

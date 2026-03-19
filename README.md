@@ -1,20 +1,24 @@
 ## fml9000
 
-A music player written in Rust with GTK4-rs
+A music player written in Rust with multiple frontends: GTK4, TUI, Web, and CLI
 
 ## Features/concepts
 
 - Inspired by foobar2000
-- GUI implemented using `gtk4-rs`
+- Multiple frontends sharing the same library and database:
+  - **GTK4 GUI** (`fml9000-gtk`) - desktop app using `gtk4-rs` + libadwaita
+  - **Web UI** (`fml9000-web`) - axum server + SolidJS frontend
+  - **TUI** (`fml9000-tui`) - terminal UI using `ratatui`
+  - **CLI scanner** (`fml9000-scan`) - command-line library management
+  - **fzf browser** - shell script using fzf + mpv
 - Plays youtube videos embedded in app
-- Show embededed art, folder art, or youtube thumbnail
+- Show embedded art, folder art, or youtube thumbnail
 - Play audio with rust `rodio` library or `mpv` for youtube
-- Add all videos from a youtube channel your library
+- Add all videos from a youtube channel to your library
 - Recently added, recently played, and playback queue auto playlists
 - Optionally auto-scan one or more folders
 - Keeps track metadata in `sqlite` database with `diesel`
 - Not MPD based (could be good or bad depending on your point of view)
-- Includes ratatui and fzf TUI/CLI interfaces for the terminal
 
 
 ## Screenshot
@@ -25,16 +29,51 @@ GUI with GTK
 ![](img/2.png)
 TUI for the terminal, uses same database
 
+![](img/3.png)
+Web UI served by axum, uses same database
+
 
 ## Usage
 
-```
+```bash
 git clone https://github.com/cmdcolin/fml9000
 cd fml9000
 cargo run -p fml9000-scan  # command-line library scanner
 cargo run -p fml9000-tui   # terminal mode
 cargo run -p fml9000-gtk   # gui mode
+cargo run -p fml9000-web   # web server (http://localhost:8080)
 ```
+
+### Web UI
+
+The web frontend is built with SolidJS + TypeScript and served by an axum
+(Rust) server. Audio plays server-side via rodio.
+
+**Production mode** (serve pre-built frontend):
+```bash
+cd crates/fml9000-web/frontend
+pnpm install
+pnpm build
+cd ../../..
+cargo run -p fml9000-web  # http://localhost:8080
+```
+
+**Development mode** (Vite HMR + axum API):
+```bash
+./crates/fml9000-web/dev.sh  # starts both, open http://localhost:5173
+```
+
+Or run them separately:
+```bash
+cargo run -p fml9000-web                      # terminal 1 - axum on :8080
+cd crates/fml9000-web/frontend && pnpm dev    # terminal 2 - vite on :5173
+```
+
+Features: track table with sorting/search, album browse grid with cover art,
+sidebar navigation (auto playlists, user playlists, YouTube channels), playback
+controls, seek/volume, shuffle/repeat, right-click context menus, keyboard
+shortcuts, WebSocket real-time state updates, auto-advance, play count
+tracking, settings persistence, URL hash routing.
 
 
 ## TUI Keyboard Shortcuts
@@ -74,6 +113,15 @@ cargo run -p fml9000-gtk   # gui mode
 | `q`           | Quit                  |
 | Right-click   | Context menu          |
 | Double-click  | Play track            |
+
+## Web UI Keyboard Shortcuts
+
+| Key     | Action         |
+| ------- | -------------- |
+| `Space` | Play / Pause   |
+| `n`     | Next track     |
+| `p`     | Previous track |
+| `s`     | Stop           |
 
 ## CLI / Shell Usage
 

@@ -1,0 +1,98 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.transport {
+  display: flex;
+  gap: 4px;
+}
+
+.transport button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.transport button:hover {
+  background: var(--bg-hover);
+}
+
+.nowPlaying {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 200px;
+}
+
+.npTitle {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.npDim {
+  color: var(--text-dim);
+}
+
+.seekBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.seekBar input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+}
+
+.time {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: center;
+}
+
+.controlsRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controlsRight button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.controlsRight button:hover {
+  color: var(--text);
+}
+
+.active {
+  color: var(--accent) !important;
+}
+
+.volume {
+  width: 80px;
+  accent-color: var(--accent);
+}

@@ -85,7 +85,7 @@ fn render_now_playing(f: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" fml9000-tui ")
+        .title(" 🌈 fml9000-tui ")
         .title_style(Style::default().fg(ACCENT_COLOR).add_modifier(Modifier::BOLD));
 
     let paragraph = Paragraph::new(text)

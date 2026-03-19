@@ -1,0 +1,63 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #1e1e2e;
+  --bg-surface: #252536;
+  --bg-hover: #2e2e42;
+  --bg-active: #3b3b55;
+  --text: #cdd6f4;
+  --text-dim: #8888aa;
+  --accent: #89b4fa;
+  --accent-dim: #5580c0;
+  --border: #3b3b55;
+  --danger: #f38ba8;
+  --row-height: 28px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.context-menu {
+  position: fixed;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.context-menu-item {
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.context-menu-item.danger {
+  color: var(--danger);
+}
+
+.context-menu-item.danger:hover {
+  background: rgba(243, 139, 168, 0.1);
+}

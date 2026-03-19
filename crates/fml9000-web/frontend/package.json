@@ -1,0 +1,17 @@
+{
+  "name": "fml9000-web-frontend",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "dev:full": "bash ../dev.sh"
+  },
+  "dependencies": {
+    "solid-js": "^1.9"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vite": "^8",
+    "vite-plugin-solid": "^2"
+  }
+}

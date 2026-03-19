@@ -113,5 +113,24 @@ pub fn extract_and_cache_album_art(track_filename: &str) -> Option<PathBuf> {
     }
   }
 
+  // Fallback: use the first .jpg or .png found in the folder
+  if let Ok(entries) = std::fs::read_dir(&dir) {
+    for entry in entries.flatten() {
+      let path = entry.path();
+      if path.is_file() {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+          if ext.eq_ignore_ascii_case("jpg")
+            || ext.eq_ignore_ascii_case("jpeg")
+            || ext.eq_ignore_ascii_case("png")
+          {
+            if let Ok(data) = std::fs::read(&path) {
+              return save_to_cache(track_filename, &data);
+            }
+          }
+        }
+      }
+    }
+  }
+
   None
 }

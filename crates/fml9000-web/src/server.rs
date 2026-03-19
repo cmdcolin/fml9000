@@ -31,7 +31,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/albums", get(browse::get_albums))
         .route("/albums/{artist}/{album}", get(browse::get_album_tracks))
         // Thumbnails
-        .route("/thumbnails/{key}", get(thumbnails::get_thumbnail))
+        .route("/thumbnails", get(thumbnails::get_thumbnail))
         // Queue
         .route("/queue", get(queue::get))
         .route("/queue", post(queue::add))
@@ -47,6 +47,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/playlists/{id}/items/remove", post(playlists::remove_item))
         // YouTube
         .route("/youtube/channels", get(youtube::list_channels))
+        .route("/youtube/channels", post(youtube::add_channel))
         .route("/youtube/channels/{id}", delete(youtube::delete_channel))
         .route("/youtube/channels/{id}/videos", get(youtube::get_channel_videos));
 

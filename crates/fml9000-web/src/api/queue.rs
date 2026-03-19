@@ -83,6 +83,14 @@ pub async fn clear(
 }
 
 pub fn media_item_to_json(item: &MediaItem) -> crate::api::tracks::MediaItemJson {
+    let (aa, tr, g) = match item {
+        MediaItem::Track(t) => (
+            t.album_artist.clone(),
+            t.track.clone(),
+            t.genre.clone(),
+        ),
+        MediaItem::Video(_) => (None, None, None),
+    };
     crate::api::tracks::MediaItemJson {
         kind: match item {
             MediaItem::Track(_) => "track".into(),
@@ -94,6 +102,9 @@ pub fn media_item_to_json(item: &MediaItem) -> crate::api::tracks::MediaItemJson
         t: Some(item.title().to_string()),
         ar: Some(item.artist().to_string()),
         al: Some(item.album().to_string()),
+        aa,
+        tr,
+        g,
         d: item.duration_seconds(),
         pc: item.play_count(),
         lp: item.last_played().map(|d| d.format("%Y-%m-%d").to_string()),
