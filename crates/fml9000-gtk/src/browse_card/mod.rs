@@ -1,6 +1,7 @@
 mod imp;
 
 use gtk::glib;
+use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
 glib::wrapper! {
@@ -28,5 +29,33 @@ impl BrowseCard {
 
   pub fn clear_thumbnail(&self) {
     self.imp().thumbnail.set_paintable(None::<&gtk::gdk::Texture>);
+  }
+
+  pub fn set_loading(&self, loading: bool) {
+    let spinner = &self.imp().loading_spinner;
+    spinner.set_visible(loading);
+    spinner.set_spinning(loading);
+    if loading {
+      self.imp().playing_icon.set_visible(false);
+      self.add_css_class("browse-card-active");
+    }
+  }
+
+  pub fn set_playing(&self, playing: bool) {
+    self.imp().playing_icon.set_visible(playing);
+    self.imp().loading_spinner.set_visible(false);
+    self.imp().loading_spinner.set_spinning(false);
+    if playing {
+      self.add_css_class("browse-card-active");
+    } else {
+      self.remove_css_class("browse-card-active");
+    }
+  }
+
+  pub fn clear_state(&self) {
+    self.imp().playing_icon.set_visible(false);
+    self.imp().loading_spinner.set_visible(false);
+    self.imp().loading_spinner.set_spinning(false);
+    self.remove_css_class("browse-card-active");
   }
 }

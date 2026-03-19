@@ -90,24 +90,17 @@ impl VideoWidget {
         *self.current_url.borrow_mut() = Some(url.to_string());
     }
 
-    pub fn play_youtube(self: &Rc<Self>, video_id: &str) {
-
-        // Show loading state
+    pub fn play_youtube(self: &Rc<Self>, video_id: &str, on_ready: Option<Rc<dyn Fn()>>) {
         self.show_loading();
 
         let url = format!("https://www.youtube.com/watch?v={video_id}");
         let widget = Rc::clone(self);
 
-        // Use std channel + glib timeout to poll for result
-        let (sender, receiver) = std::sync::mpsc::channel::<Result<String, String>>();
+        let (sender, receiver) = futures::channel::oneshot::channel::<Result<String, String>>();
 
         std::thread::spawn(move || {
             let result = Command::new("yt-dlp")
-                .args([
-                    "-f", "18/22/best[ext=mp4]/best",
-                    "-g",
-                    &url
-                ])
+                .args(["-f", "18/22/best[ext=mp4]/best", "-g", &url])
                 .output();
 
             let message = match result {
@@ -123,25 +116,19 @@ impl VideoWidget {
             let _ = sender.send(message);
         });
 
-        // Poll for result from main thread
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match receiver.try_recv() {
-                Ok(Ok(stream_url)) => {
-                    widget.play(&stream_url);
-                    glib::ControlFlow::Break
-                }
-                Ok(Err(e)) => {
-                    eprintln!("yt-dlp error: {e}");
-                    widget.show_video();
-                    glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    glib::ControlFlow::Continue
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    eprintln!("yt-dlp channel disconnected");
-                    widget.show_video();
-                    glib::ControlFlow::Break
+        glib::spawn_future_local(async move {
+            if let Ok(result) = receiver.await {
+                match result {
+                    Ok(stream_url) => {
+                        widget.play(&stream_url);
+                        if let Some(cb) = &on_ready {
+                            cb();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("yt-dlp error: {e}");
+                        widget.show_video();
+                    }
                 }
             }
         });

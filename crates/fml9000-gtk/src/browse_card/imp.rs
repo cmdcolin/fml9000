@@ -14,11 +14,40 @@ use gtk::CompositeTemplate;
     <property name="margin-top">4</property>
     <property name="margin-bottom">4</property>
     <child>
-      <object class="GtkPicture" id="thumbnail">
+      <object class="GtkOverlay" id="thumbnail_overlay">
         <property name="width-request">200</property>
         <property name="height-request">150</property>
-        <property name="content-fit">cover</property>
-        <property name="can-shrink">true</property>
+        <property name="overflow">hidden</property>
+        <child>
+          <object class="GtkPicture" id="thumbnail">
+            <property name="content-fit">cover</property>
+            <property name="can-shrink">true</property>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkImage" id="playing_icon">
+            <property name="icon-name">media-playback-pause-symbolic</property>
+            <property name="pixel-size">32</property>
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <property name="visible">false</property>
+            <style>
+              <class name="browse-playing-icon"/>
+            </style>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkSpinner" id="loading_spinner">
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <property name="width-request">32</property>
+            <property name="height-request">32</property>
+            <property name="visible">false</property>
+            <style>
+              <class name="browse-loading-spinner"/>
+            </style>
+          </object>
+        </child>
       </object>
     </child>
     <child>
@@ -47,6 +76,10 @@ use gtk::CompositeTemplate;
 pub struct BrowseCardImp {
   #[template_child]
   pub thumbnail: TemplateChild<gtk::Picture>,
+  #[template_child]
+  pub playing_icon: TemplateChild<gtk::Image>,
+  #[template_child]
+  pub loading_spinner: TemplateChild<gtk::Spinner>,
   #[template_child]
   pub title_label: TemplateChild<gtk::Label>,
   #[template_child]

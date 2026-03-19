@@ -16,7 +16,6 @@ pub enum SourceKind {
   RecentlyAdded,
   RecentlyPlayed,
   PlaybackQueue,
-  Albums,
   UserPlaylist(i32, String),
   YouTubeChannel(i32, String),
 }
@@ -30,7 +29,6 @@ impl SourceKind {
       SourceKind::RecentlyAdded => "Recently Added".to_string(),
       SourceKind::RecentlyPlayed => "Recently Played".to_string(),
       SourceKind::PlaybackQueue => "Playback Queue".to_string(),
-      SourceKind::Albums => "Albums".to_string(),
       SourceKind::UserPlaylist(_, name) => name.clone(),
       SourceKind::YouTubeChannel(_, name) => name.clone(),
     }
@@ -59,7 +57,6 @@ impl SourceKind {
       SourceKind::RecentlyAdded => load_recently_added_items(0),
       SourceKind::RecentlyPlayed => load_recently_played_items(100),
       SourceKind::PlaybackQueue => get_queue_items(),
-      SourceKind::Albums => Vec::new(),
       SourceKind::UserPlaylist(id, _) => get_playlist_items(*id).unwrap_or_default(),
       SourceKind::YouTubeChannel(id, _) => get_videos_for_channel(*id)
         .unwrap_or_default()
@@ -130,8 +127,9 @@ pub fn get_distinct_album_items() -> Vec<(String, String, String)> {
       let artist = track
         .album_artist
         .clone()
-        .or(track.artist.clone())
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| {
+          track.artist.clone().unwrap_or_else(|| "Unknown".to_string())
+        });
       let album = track
         .album
         .clone()
@@ -151,7 +149,7 @@ pub fn populate_section_headers(store: &ListStore) {
     SectionId::UserPlaylists,
   )));
   store.append(&BoxedAnyObject::new(TreeEntry::SectionHeader(
-    "YouTube Channels".to_string(),
+    "YouTube".to_string(),
     SectionId::YouTubeChannels,
   )));
 }

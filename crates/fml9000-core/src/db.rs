@@ -613,26 +613,42 @@ pub fn queue_len() -> usize {
 }
 
 pub fn get_distinct_albums() -> Vec<Arc<Track>> {
-  use crate::schema::tracks::dsl;
+  use diesel::sql_query;
+  use diesel::sql_types::*;
+
+  #[derive(QueryableByName)]
+  struct AlbumRow {
+    #[diesel(sql_type = Text)]
+    filename: String,
+    #[diesel(sql_type = Nullable<Text>)]
+    artist: Option<String>,
+    #[diesel(sql_type = Nullable<Text>)]
+    album: Option<String>,
+    #[diesel(sql_type = Nullable<Text>)]
+    album_artist: Option<String>,
+  }
 
   with_db(|conn| {
-    let all_tracks: Vec<Track> = dsl::tracks
-      .order((dsl::album_artist.asc(), dsl::album.asc()))
-      .load::<Track>(conn)
-      .unwrap_or_default();
+    let rows: Vec<AlbumRow> = sql_query(
+      "SELECT MIN(filename) as filename, MIN(artist) as artist, album, album_artist \
+       FROM tracks GROUP BY album_artist, album ORDER BY album_artist, album"
+    )
+    .load(conn)
+    .unwrap_or_default();
 
-    let mut seen = std::collections::HashSet::new();
-    let mut result = Vec::new();
-    for track in all_tracks {
-      let key = (
-        track.album_artist.clone().or(track.artist.clone()),
-        track.album.clone(),
-      );
-      if seen.insert(key) {
-        result.push(Arc::new(track));
-      }
-    }
-    Ok(result)
+    Ok(rows.into_iter().map(|r| Arc::new(Track {
+      filename: r.filename,
+      title: None,
+      artist: r.artist,
+      album: r.album,
+      album_artist: r.album_artist,
+      track: None,
+      genre: None,
+      added: None,
+      duration_seconds: None,
+      play_count: 0,
+      last_played: None,
+    })).collect())
   })
   .unwrap_or_default()
 }
@@ -760,6 +776,21 @@ pub fn add_youtube_channel(
       .first::<i32>(conn)
       .map_err(|e| format!("Failed to get channel id: {e}"))
   })
+}
+
+pub fn get_channel_name_map() -> std::collections::HashMap<i32, String> {
+  with_db(|conn| {
+    let channels: Vec<(i32, String)> = youtube_channels::table
+      .select((youtube_channels::id, youtube_channels::name))
+      .load(conn)
+      .unwrap_or_default();
+    let mut map = std::collections::HashMap::new();
+    for (id, name) in channels {
+      map.insert(id, name);
+    }
+    Ok(map)
+  })
+  .unwrap_or_default()
 }
 
 pub fn get_youtube_channels() -> Result<Vec<Arc<YouTubeChannel>>, String> {

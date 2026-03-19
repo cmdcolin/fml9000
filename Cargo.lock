@@ -837,6 +837,7 @@ dependencies = [
  "diesel",
  "directories",
  "fml9000-core",
+ "futures",
  "gtk4",
  "libadwaita",
  "lofty",

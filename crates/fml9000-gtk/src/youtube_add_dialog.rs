@@ -20,7 +20,7 @@ pub fn show_dialog(
   let wnd = playback_controller.window();
 
   let dialog = gtk::Window::builder()
-    .title("Add YouTube Channels")
+    .title("Add YouTube Channels / Playlists")
     .default_width(500)
     .default_height(350)
     .modal(true)
@@ -37,7 +37,7 @@ pub fn show_dialog(
     .build();
 
   let hint_label = gtk::Label::builder()
-    .label("Enter YouTube channel URLs or handles (one per line)")
+    .label("Enter YouTube channel URLs, playlist URLs, or handles (one per line)")
     .xalign(0.0)
     .build();
 
@@ -75,7 +75,7 @@ pub fn show_dialog(
   let cancel_btn = gtk::Button::builder().label("Cancel").build();
 
   let add_btn = gtk::Button::builder()
-    .label("Add Channels")
+    .label("Add")
     .css_classes(["suggested-action"])
     .sensitive(false)
     .build();
@@ -146,7 +146,7 @@ pub fn show_dialog(
     spin2.set_spinning(true);
 
     let total = urls.len();
-    status2.set_label(&format!("Fetching channel 1 of {}...", total));
+    status2.set_label(&format!("Fetching 1 of {}...", total));
 
     let (tx, rx) = mpsc::channel::<FetchResult>();
 
@@ -205,7 +205,7 @@ pub fn show_dialog(
           }
 
           if processed < total {
-            status2.set_label(&format!("Fetching channel {} of {}...", processed + 1, total));
+            status2.set_label(&format!("Fetching {} of {}...", processed + 1, total));
           }
           glib::ControlFlow::Continue
         }
@@ -215,7 +215,7 @@ pub fn show_dialog(
           let processed = *processed_count.borrow();
 
           if processed < total {
-            status2.set_label(&format!("Fetching channel {} of {}...", processed + 1, total));
+            status2.set_label(&format!("Fetching {} of {}...", processed + 1, total));
           }
           glib::ControlFlow::Continue
         }
@@ -227,9 +227,9 @@ pub fn show_dialog(
           let errors = *error_count.borrow();
 
           if errors == 0 {
-            status2.set_label(&format!("Added {} channels", added));
+            status2.set_label(&format!("Added {} source(s)", added));
           } else {
-            status2.set_label(&format!("Added {} channels, {} failed", added, errors));
+            status2.set_label(&format!("Added {} source(s), {} failed", added, errors));
           }
 
           let dialog_weak3 = dialog_weak2.clone();

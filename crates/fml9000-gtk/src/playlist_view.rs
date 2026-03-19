@@ -1,10 +1,10 @@
 use crate::grid_cell::Entry;
-use crate::gtk_helpers::{get_cell, setup_col, str_or_unknown};
+use crate::gtk_helpers::{get_cell, setup_col};
 use crate::video_widget::open_in_browser;
 use crate::playback_controller::PlaybackController;
 use crate::settings::FmlSettings;
 use fml9000_core::{
-  get_playlist_items, reorder_playlist_items, remove_from_playlist, MediaItem,
+  get_channel_name_map, get_playlist_items, reorder_playlist_items, remove_from_playlist, MediaItem,
   PlaylistItemIdentifier,
 };
 use gtk::gdk;
@@ -86,16 +86,13 @@ pub fn create_playlist_view(
   current_playlist_id: CurrentPlaylistId,
   is_viewing_playback_queue: IsViewingPlaybackQueue,
 ) -> ScrolledWindow {
-  let artistalbum_sorter = create_sorter(|item| match item {
-    MediaItem::Track(r) => format!(
-      "{} // {}",
-      str_or_unknown(&r.album),
-      str_or_unknown(&r.artist),
-    ),
-    MediaItem::Video(v) => {
-      let (artist, album) = parse_youtube_title(&v.title);
-      format!("{} // {}", album, artist)
-    }
+  let channel_names: Rc<std::collections::HashMap<i32, String>> = Rc::new(get_channel_name_map());
+
+  let channel_names_for_sorter = Rc::clone(&channel_names);
+  let artistalbum_sorter = create_sorter(move |item| {
+    let artist = item.artist_with_channel_names(&channel_names_for_sorter);
+    let album = item.album();
+    format!("{} // {}", album, artist)
   });
 
   let track_num_sorter = CustomSorter::new(move |obj1, obj2| {
@@ -131,18 +128,11 @@ pub fn create_playlist_view(
     .model(&playlist_sel)
     .build();
 
-  let artistalbum = create_column(Rc::clone(&settings), |item| match item {
-    MediaItem::Track(r) => {
-      format!(
-        "{} // {}",
-        str_or_unknown(&r.album),
-        str_or_unknown(&r.artist),
-      )
-    }
-    MediaItem::Video(v) => {
-      let (artist, album) = parse_youtube_title(&v.title);
-      format!("{} // {}", album, artist)
-    }
+  let channel_names_for_col = Rc::clone(&channel_names);
+  let artistalbum = create_column(Rc::clone(&settings), move |item| {
+    let artist = item.artist_with_channel_names(&channel_names_for_col);
+    let album = item.album();
+    format!("{} // {}", album, artist)
   });
 
   let track_num = create_column(Rc::clone(&settings), |item| match item {
@@ -754,22 +744,3 @@ pub fn create_playlist_view(
     .build()
 }
 
-fn parse_youtube_title(title: &str) -> (String, String) {
-  if let Some((artist, rest)) = title.split_once(" - ") {
-    let album = rest
-      .trim()
-      .split('[')
-      .next()
-      .unwrap_or(rest)
-      .trim()
-      .trim_end_matches([')', ' '])
-      .split('(')
-      .next()
-      .unwrap_or(rest)
-      .trim();
-
-    (artist.trim().to_string(), album.to_string())
-  } else {
-    ("Unknown".to_string(), title.to_string())
-  }
-}

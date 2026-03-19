@@ -1,5 +1,6 @@
 use crate::models::{Track, YouTubeVideo};
 use chrono::NaiveDateTime;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub fn format_duration_secs(total_secs: i32) -> String {
@@ -23,7 +24,17 @@ impl MediaItem {
     pub fn artist(&self) -> &str {
         match self {
             MediaItem::Track(t) => t.artist.as_deref().unwrap_or("Unknown"),
-            MediaItem::Video(_) => "YouTube",
+            MediaItem::Video(_) => "",
+        }
+    }
+
+    pub fn artist_with_channel_names(&self, channel_names: &HashMap<i32, String>) -> String {
+        match self {
+            MediaItem::Track(t) => t.artist.clone().unwrap_or_else(|| "Unknown".to_string()),
+            MediaItem::Video(v) => channel_names
+                .get(&v.channel_id)
+                .cloned()
+                .unwrap_or_default(),
         }
     }
 
@@ -207,9 +218,9 @@ mod tests {
     }
 
     #[test]
-    fn video_artist_is_youtube() {
+    fn video_artist_is_empty() {
         let item = make_video("abc", "Vid", None);
-        assert_eq!(item.artist(), "YouTube");
+        assert_eq!(item.artist(), "");
     }
 
     #[test]

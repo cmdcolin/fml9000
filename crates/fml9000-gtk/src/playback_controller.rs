@@ -39,6 +39,13 @@ pub enum PlaybackSource {
   YouTube,
 }
 
+#[derive(Clone, PartialEq, Debug)]
+pub enum PlayState {
+  Idle,
+  Loading(String),
+  Playing(String),
+}
+
 pub struct PlaybackController {
   audio: AudioPlayer,
   video_widget: Rc<VideoWidget>,
@@ -51,8 +58,10 @@ pub struct PlaybackController {
   album_art: Rc<Picture>,
   window: Rc<ApplicationWindow>,
   play_stats: RefCell<CurrentPlayStats>,
+  play_state: RefCell<PlayState>,
   on_queue_changed: RefCell<Option<Rc<dyn Fn()>>>,
   on_track_changed: RefCell<Option<Rc<dyn Fn(u32)>>>,
+  on_play_state_changed: RefCell<Option<Rc<dyn Fn(&PlayState)>>>,
 }
 
 impl PlaybackController {
@@ -78,8 +87,10 @@ impl PlaybackController {
       album_art,
       window,
       play_stats: RefCell::new(CurrentPlayStats::None),
+      play_state: RefCell::new(PlayState::Idle),
       on_queue_changed: RefCell::new(None),
       on_track_changed: RefCell::new(None),
+      on_play_state_changed: RefCell::new(None),
     })
   }
 
@@ -194,6 +205,7 @@ impl PlaybackController {
       str_or_unknown(&title),
     )));
 
+    self.set_play_state(PlayState::Playing(filename));
     true
   }
 
@@ -250,7 +262,19 @@ impl PlaybackController {
     self.audio.stop();
     self.playback_source.set(PlaybackSource::YouTube);
     self.media_stack.set_visible_child_name("video");
-    self.video_widget.play_youtube(&video.video_id);
+
+    self.set_play_state(PlayState::Loading(video.video_id.clone()));
+
+    let on_play_state_changed = self.on_play_state_changed.borrow().clone();
+    let play_state = self.play_state.clone();
+    let video_id_key = video.video_id.clone();
+    self.video_widget.play_youtube(&video.video_id, Some(Rc::new(move || {
+      let new_state = PlayState::Playing(video_id_key.clone());
+      *play_state.borrow_mut() = new_state.clone();
+      if let Some(cb) = &on_play_state_changed {
+        cb(&new_state);
+      }
+    })));
 
     *self.play_stats.borrow_mut() = CurrentPlayStats::Video {
       id: video.id,
@@ -409,6 +433,21 @@ impl PlaybackController {
     if let Some(cb) = self.on_track_changed.borrow().as_ref() {
       cb(index);
     }
+  }
+
+  pub fn play_state(&self) -> PlayState {
+    self.play_state.borrow().clone()
+  }
+
+  pub fn set_play_state(&self, state: PlayState) {
+    *self.play_state.borrow_mut() = state.clone();
+    if let Some(cb) = self.on_play_state_changed.borrow().as_ref() {
+      cb(&state);
+    }
+  }
+
+  pub fn set_on_play_state_changed(&self, callback: Option<Rc<dyn Fn(&PlayState)>>) {
+    *self.on_play_state_changed.borrow_mut() = callback;
   }
 
   pub fn remove_item_from_queue(&self, item: &MediaItem) {

@@ -2,6 +2,7 @@ use crate::playback_controller::PlaybackController;
 use crate::playlist_manager::populate_playlist_store;
 use crate::settings::{write_settings, FmlSettings, RowHeight};
 use crate::facet_box::{load_facet_store, load_playlist_store};
+use crate::youtube;
 use crate::youtube_add_dialog;
 use fml9000_core::youtube_api;
 use adw::prelude::*;
@@ -699,29 +700,17 @@ pub async fn dialog(
 
       let channel_data: Vec<_> = channels
         .iter()
-        .map(|c| (c.id, c.name.clone(), c.handle.clone()))
+        .map(|c| (c.id, c.name.clone(), c.handle.clone(), c.channel_id.clone(), c.url.clone()))
         .collect();
 
       std::thread::spawn(move || {
         let mut total_new_videos = 0usize;
         let mut channels_updated = 0usize;
 
-        for (channel_id, channel_name, channel_handle) in &channel_data {
+        for (db_id, channel_name, channel_handle, yt_channel_id, source_url) in &channel_data {
           let _ = tx.send(YtRefreshProgress::StartingChannel(channel_name.clone()));
 
-          let handle = match channel_handle {
-            Some(h) => h.clone(),
-            None => {
-              let _ = tx.send(YtRefreshProgress::ChannelError(
-                channel_name.clone(),
-                "No handle available".to_string(),
-              ));
-              std::thread::sleep(std::time::Duration::from_secs(1));
-              continue;
-            }
-          };
-
-          let existing_ids = match get_video_ids_for_channel(*channel_id) {
+          let existing_ids = match get_video_ids_for_channel(*db_id) {
             Ok(ids) => ids,
             Err(e) => {
               let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
@@ -730,39 +719,82 @@ pub async fn dialog(
             }
           };
 
-          let playlist_id = match youtube_api::get_playlist_id_for_handle(&handle) {
-            Ok(id) => id,
-            Err(e) => {
-              let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
-              std::thread::sleep(std::time::Duration::from_secs(1));
-              continue;
+          let new_count = if yt_channel_id.starts_with("PL") {
+            let name_for_progress = channel_name.clone();
+            let tx_for_progress = tx.clone();
+            match youtube::fetch_channel_info(source_url, |msg| {
+              let _ = tx_for_progress.send(YtRefreshProgress::FoundVideos(name_for_progress.clone(), msg.len()));
+            }) {
+              Ok((_info, videos)) => {
+                let new_videos: Vec<_> = videos
+                  .into_iter()
+                  .filter(|v| !existing_ids.contains(&v.video_id))
+                  .collect();
+                let count = new_videos.len();
+                if count > 0 {
+                  let video_tuples: Vec<_> = new_videos
+                    .iter()
+                    .map(|v| (v.video_id.clone(), v.title.clone(), v.duration_seconds, v.thumbnail_url.clone(), v.published_at))
+                    .collect();
+                  let _ = add_youtube_videos(*db_id, &video_tuples);
+                  total_new_videos += count;
+                }
+                count
+              }
+              Err(e) => {
+                let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                continue;
+              }
             }
+          } else {
+            let handle = match channel_handle {
+              Some(h) => h.clone(),
+              None => {
+                let _ = tx.send(YtRefreshProgress::ChannelError(
+                  channel_name.clone(),
+                  "No handle available".to_string(),
+                ));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                continue;
+              }
+            };
+
+            let playlist_id = match youtube_api::get_playlist_id_for_handle(&handle) {
+              Ok(id) => id,
+              Err(e) => {
+                let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                continue;
+              }
+            };
+
+            let name_for_progress = channel_name.clone();
+            let tx_for_progress = tx.clone();
+            let new_videos = match youtube_api::fetch_new_videos(&playlist_id, &existing_ids, fetch_all, move |found, _total| {
+              let _ = tx_for_progress.send(YtRefreshProgress::FoundVideos(name_for_progress.clone(), found));
+            }) {
+              Ok(v) => v,
+              Err(e) => {
+                let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                continue;
+              }
+            };
+
+            let count = new_videos.len();
+            if count > 0 {
+              let video_tuples: Vec<_> = new_videos
+                .iter()
+                .map(|v| (v.video_id.clone(), v.title.clone(), None, v.thumbnail_url.clone(), v.published_at))
+                .collect();
+              let _ = add_youtube_videos(*db_id, &video_tuples);
+              total_new_videos += count;
+            }
+            count
           };
 
-          let name_for_progress = channel_name.clone();
-          let tx_for_progress = tx.clone();
-          let new_videos = match youtube_api::fetch_new_videos(&playlist_id, &existing_ids, fetch_all, move |found, _total| {
-            let _ = tx_for_progress.send(YtRefreshProgress::FoundVideos(name_for_progress.clone(), found));
-          }) {
-            Ok(v) => v,
-            Err(e) => {
-              let _ = tx.send(YtRefreshProgress::ChannelError(channel_name.clone(), e));
-              std::thread::sleep(std::time::Duration::from_secs(1));
-              continue;
-            }
-          };
-
-          let new_count = new_videos.len();
-          if new_count > 0 {
-            let video_tuples: Vec<_> = new_videos
-              .iter()
-              .map(|v| (v.video_id.clone(), v.title.clone(), None, v.thumbnail_url.clone(), v.published_at))
-              .collect();
-            let _ = add_youtube_videos(*channel_id, &video_tuples);
-            total_new_videos += new_count;
-          }
-
-          let _ = update_channel_last_fetched(*channel_id);
+          let _ = update_channel_last_fetched(*db_id);
           channels_updated += 1;
 
           let _ = tx.send(YtRefreshProgress::ChannelDone(channel_name.clone(), new_count));
@@ -895,9 +927,11 @@ fn build_channel_rows(
     row.add_suffix(&refresh_btn);
     row.add_suffix(&delete_btn);
 
-    let channel_id = channel.id;
+    let channel_db_id = channel.id;
     let channel_name = channel.name.clone();
     let channel_handle = channel.handle.clone();
+    let yt_channel_id = channel.channel_id.clone();
+    let source_url = channel.url.clone();
     let yt_group = youtube_group.clone();
     let cr = channel_rows.clone();
     let prefs_window = preferences_window.clone();
@@ -906,12 +940,17 @@ fn build_channel_rows(
     refresh_btn.connect_clicked(move |btn| {
       btn.set_sensitive(false);
 
-      let handle = match &channel_handle {
-        Some(h) => h.clone(),
-        None => {
-          eprintln!("No handle for channel {}", channel_name);
-          btn.set_sensitive(true);
-          return;
+      let is_yt_playlist = yt_channel_id.starts_with("PL");
+      let handle = if is_yt_playlist {
+        String::new()
+      } else {
+        match &channel_handle {
+          Some(h) => h.clone(),
+          None => {
+            eprintln!("No handle for channel {}", channel_name);
+            btn.set_sensitive(true);
+            return;
+          }
         }
       };
 
@@ -956,8 +995,9 @@ fn build_channel_rows(
       let (tx, rx) = mpsc::channel::<SingleChannelProgress>();
       let name_clone = channel_name.clone();
 
+      let source_url_clone = source_url.clone();
       std::thread::spawn(move || {
-        let existing_ids = match get_video_ids_for_channel(channel_id) {
+        let existing_ids = match get_video_ids_for_channel(channel_db_id) {
           Ok(ids) => ids,
           Err(e) => {
             let _ = tx.send(SingleChannelProgress::Error(e));
@@ -965,35 +1005,63 @@ fn build_channel_rows(
           }
         };
 
-        let playlist_id = match youtube_api::get_playlist_id_for_handle(&handle) {
-          Ok(id) => id,
-          Err(e) => {
-            let _ = tx.send(SingleChannelProgress::Error(e));
-            return;
+        let new_count = if is_yt_playlist {
+          let tx_for_progress = tx.clone();
+          match youtube::fetch_channel_info(&source_url_clone, |_msg| {
+            let _ = tx_for_progress.send(SingleChannelProgress::FoundVideos(0));
+          }) {
+            Ok((_info, videos)) => {
+              let new_videos: Vec<_> = videos
+                .into_iter()
+                .filter(|v| !existing_ids.contains(&v.video_id))
+                .collect();
+              let count = new_videos.len();
+              if count > 0 {
+                let video_tuples: Vec<_> = new_videos
+                  .iter()
+                  .map(|v| (v.video_id.clone(), v.title.clone(), v.duration_seconds, v.thumbnail_url.clone(), v.published_at))
+                  .collect();
+                let _ = add_youtube_videos(channel_db_id, &video_tuples);
+              }
+              count
+            }
+            Err(e) => {
+              let _ = tx.send(SingleChannelProgress::Error(e));
+              return;
+            }
           }
+        } else {
+          let playlist_id = match youtube_api::get_playlist_id_for_handle(&handle) {
+            Ok(id) => id,
+            Err(e) => {
+              let _ = tx.send(SingleChannelProgress::Error(e));
+              return;
+            }
+          };
+
+          let tx_for_progress = tx.clone();
+          let new_videos = match youtube_api::fetch_new_videos(&playlist_id, &existing_ids, false, move |found, _total| {
+            let _ = tx_for_progress.send(SingleChannelProgress::FoundVideos(found));
+          }) {
+            Ok(v) => v,
+            Err(e) => {
+              let _ = tx.send(SingleChannelProgress::Error(e));
+              return;
+            }
+          };
+
+          let count = new_videos.len();
+          if count > 0 {
+            let video_tuples: Vec<_> = new_videos
+              .iter()
+              .map(|v| (v.video_id.clone(), v.title.clone(), None, v.thumbnail_url.clone(), v.published_at))
+              .collect();
+            let _ = add_youtube_videos(channel_db_id, &video_tuples);
+          }
+          count
         };
 
-        let tx_for_progress = tx.clone();
-        let new_videos = match youtube_api::fetch_new_videos(&playlist_id, &existing_ids, false, move |found, _total| {
-          let _ = tx_for_progress.send(SingleChannelProgress::FoundVideos(found));
-        }) {
-          Ok(v) => v,
-          Err(e) => {
-            let _ = tx.send(SingleChannelProgress::Error(e));
-            return;
-          }
-        };
-
-        let new_count = new_videos.len();
-        if new_count > 0 {
-          let video_tuples: Vec<_> = new_videos
-            .iter()
-            .map(|v| (v.video_id.clone(), v.title.clone(), None, v.thumbnail_url.clone(), v.published_at))
-            .collect();
-          let _ = add_youtube_videos(channel_id, &video_tuples);
-        }
-
-        let _ = update_channel_last_fetched(channel_id);
+        let _ = update_channel_last_fetched(channel_db_id);
         let _ = tx.send(SingleChannelProgress::Done(new_count));
       });
 

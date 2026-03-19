@@ -3,9 +3,13 @@
 ## Current State
 
 FML9000 is a Rust music player inspired by foobar2000 with three interfaces (GTK4
-GUI, TUI, CLI scanner) sharing a SQLite database. It supports local audio playback
-via rodio, YouTube video/audio via yt-dlp + GStreamer, playlists, queue management,
-library scanning, and a thumbnail browse grid.
+GUI, TUI, CLI scanner) plus fzf/mpv shell scripts, all sharing a SQLite database.
+It supports local audio playback via rodio, YouTube video/audio via yt-dlp +
+GStreamer, playlists, queue management, library scanning with live file watching,
+a thumbnail browse grid with album detail views, now-playing indicators with
+loading/playing states, and a vaporwave audio effect mode via ffmpeg. Async
+background work (thumbnail fetching, YouTube URL resolution, download progress)
+uses `futures::channel` + `glib::spawn_future_local` instead of polling timers.
 
 ## Architecture Improvements
 
@@ -33,7 +37,22 @@ thread + progress polling) should move to its own module, e.g.
 The `PlaybackController` (GTK) and `App` (TUI) both manage play statistics
 tracking (50% threshold counting), album art display, and now-playing state. A
 shared `PlaybackState` struct in core could track current item, play stats, and
-threshold logic.
+threshold logic. The GTK side now has a centralized `PlayState` enum
+(`Idle`/`Loading(key)`/`Playing(key)`) on `PlaybackController` with an
+`on_play_state_changed` callback — this could be moved to core.
+
+### Adopt GTK4 native reactive patterns incrementally
+
+The codebase uses `Rc<RefCell<>>` and manual remove/insert hacks to force
+GridView rebinds when state changes. Incrementally adopting GTK4's property
+bindings and expressions would eliminate this:
+
+- Make `PlayState` a GObject property so widgets can bind to it directly
+- Use `PropertyExpression` + `ClosureExpression` for reactive list item binding
+- Use `bind_property()` for one-way/bidirectional sync between widget properties
+
+This avoids framework dependencies (Relm4 lags behind gtk4-rs releases) while
+using GTK4's built-in reactivity. Can be done panel-by-panel.
 
 ## Feature Roadmap
 
@@ -55,12 +74,18 @@ threshold logic.
 - ~~**Album detail view**~~ ✓ — clicking an album card shows all tracks with
   play-all and queue-all actions, with a back button to return to the grid.
 
-- **Lazy thumbnail loading indicator** — show a spinner or placeholder icon while
-  thumbnails are being fetched, instead of a blank space.
+- ~~**Lazy thumbnail loading indicator**~~ ✓ — browse cards show a spinner
+  overlay during loading and a pause icon overlay when playing, with a light
+  accent highlight on the active card.
 
-- **Thumbnail grid responsiveness** — currently the grid auto-sizes columns
-  between 2-20. Add a zoom slider or use the window width to compute a sensible
-  default column count.
+- ~~**Thumbnail grid responsiveness**~~ ✓ — grid auto-sizes columns between 2-20
+  based on window width (browser tiler).
+
+- ~~**Add YouTube button in Browse panel**~~ ✓ — "+" button in the browse sidebar
+  header opens the add-channel dialog and refreshes the source tree on completion.
+
+- **Thumbnail zoom slider** — let the user control thumbnail size with a slider
+  in the browse panel toolbar, adjusting the grid column count.
 
 ### P2 — Library & Metadata
 
@@ -114,11 +139,54 @@ threshold logic.
   silently `eprintln!` and return defaults. Standardize on `Result` and let
   callers decide how to handle errors.
 
+- **Browse view rebind hack** — the `rebind_matching_items` function does
+  remove/insert on the `ListStore` to force GridView to re-run bind callbacks.
+  This would be eliminated by making browse items GObject subclasses with
+  properties that widgets bind to reactively.
+
 - **Test coverage** — 58 unit tests cover core logic (facets, audio detection,
   playback navigation, media item accessors). Missing: DB integration tests
   (need temp database), GTK widget tests (need headless display), thumbnail
   cache tests, YouTube API tests (need mocking).
 
-## Next features
+## Next Features
 
-- Add easy 'add youtube' button in the 'Browse' panel
+### Browse & Navigation
+
+- **Artist detail view** — similar to album detail, clicking an artist in the
+  browse grid shows all albums by that artist with expandable track listings.
+
+- **Search-as-you-type in browse panel** — the current search should filter the
+  grid in real time as the user types, with debouncing to avoid jank on large
+  libraries.
+
+- **Keyboard navigation in browse grid** — arrow keys to move between cards,
+  Enter to open detail view, Escape to go back. Currently mouse-only.
+
+### Playback & Audio
+
+- **Volume normalization** — combine ReplayGain tag reading with rodio's
+  `amplify()` to even out loudness across tracks without manual volume adjustment.
+
+- **Audio device selection** — let the user pick the output device from
+  preferences instead of always using the system default.
+
+### YouTube
+
+- **YouTube playlist import** — accept YouTube playlist URLs (not just channels)
+  and import all videos as a local playlist.
+
+- **YouTube search** — search YouTube directly from the browse panel and add
+  individual videos to the library without needing a channel URL.
+
+- **Offline cache** — download YouTube audio to a local cache directory so
+  previously played videos can be replayed without network access.
+
+### TUI
+
+- **TUI browse panel** — the TUI currently lacks the browse/thumbnail grid that
+  the GTK app has. Add a simplified text-based browse view with album/artist
+  navigation.
+
+- **TUI playlist management** — create, rename, delete, and reorder playlists
+  from the TUI, matching GTK's playlist manager capabilities.

@@ -1,13 +1,13 @@
 use crate::browse_card::BrowseCard;
 use crate::grid_cell::{Entry, GridCell};
-use crate::playback_controller::PlaybackController;
+use crate::playback_controller::{PlayState, PlaybackController};
 use crate::settings::FmlSettings;
 use crate::source_model::{
   build_section_children, get_distinct_album_items, populate_section_headers,
   try_get_source_from_row, SourceKind, TreeEntry,
 };
 use crate::youtube_add_dialog;
-use fml9000_core::{format_duration_secs, load_tracks_by_album, thumbnail_cache};
+use fml9000_core::{format_duration_secs, get_channel_name_map, load_tracks_by_album, thumbnail_cache};
 use fml9000_core::MediaItem;
 use gtk::gio::ListStore;
 use gtk::glib::BoxedAnyObject;
@@ -31,18 +31,31 @@ enum BrowseItem {
   },
 }
 
+fn collect_album_items() -> Vec<BrowseItem> {
+  get_distinct_album_items()
+    .into_iter()
+    .map(|(artist, album, filename)| BrowseItem::Album {
+      artist,
+      album,
+      representative_filename: filename,
+    })
+    .collect()
+}
+
 fn collect_items_for_source(source: &SourceKind) -> Vec<BrowseItem> {
-  if *source == SourceKind::Albums {
-    return get_distinct_album_items()
-      .into_iter()
-      .map(|(artist, album, filename)| BrowseItem::Album {
-        artist,
-        album,
-        representative_filename: filename,
-      })
-      .collect();
+  match source {
+    SourceKind::AllTracks => collect_album_items(),
+    SourceKind::AllMedia => {
+      let mut items = collect_album_items();
+      for v in fml9000_core::get_all_videos().unwrap_or_default() {
+        items.push(BrowseItem::Media(MediaItem::Video(v)));
+      }
+      items
+    }
+    _ => {
+      source.load_items().into_iter().map(BrowseItem::Media).collect()
+    }
   }
-  source.load_items().into_iter().map(BrowseItem::Media).collect()
 }
 
 fn browse_item_cache_key(item: &BrowseItem) -> Option<String> {
@@ -57,6 +70,19 @@ fn browse_item_cache_key(item: &BrowseItem) -> Option<String> {
     BrowseItem::Album { representative_filename, .. } => {
       Some(representative_filename.clone())
     }
+  }
+}
+
+fn browse_item_play_key(item: &BrowseItem) -> Option<String> {
+  match item {
+    BrowseItem::Media(media_item) => {
+      if let Some(filename) = media_item.track_filename() {
+        Some(filename.to_string())
+      } else {
+        media_item.youtube_video_id().map(|s| s.to_string())
+      }
+    }
+    BrowseItem::Album { .. } => None,
   }
 }
 
@@ -84,7 +110,7 @@ enum FetchKind {
 
 fn spawn_fetch(
   pending: &Arc<Mutex<HashSet<String>>>,
-  tx: &Arc<Mutex<std::sync::mpsc::Sender<String>>>,
+  tx: &futures::channel::mpsc::UnboundedSender<String>,
   key: String,
   kind: FetchKind,
 ) {
@@ -100,28 +126,87 @@ fn spawn_fetch(
       FetchKind::AlbumArt => thumbnail_cache::extract_and_cache_album_art(&key),
     };
     if result.is_some() {
-      if let Ok(tx) = tx.lock() {
-        let _ = tx.send(key);
-      }
+      let _ = tx.unbounded_send(key);
     }
   });
 }
 
-fn reload_grid(grid_store: &ListStore, sources: &[SourceKind], search_query: &str) {
-  grid_store.remove_all();
-
-  let mut items: Vec<BrowseItem> = Vec::new();
-  for source in sources {
-    for item in collect_items_for_source(source) {
-      if item_matches_search(&item, search_query) {
-        items.push(item);
+fn rebind_matching_items(grid_store: &ListStore, keys: &[String]) {
+  let n = grid_store.n_items();
+  for i in 0..n {
+    if let Some(obj) = grid_store.item(i) {
+      if let Ok(boxed) = obj.downcast::<BoxedAnyObject>() {
+        if let Ok(bi) = boxed.try_borrow::<BrowseItem>() {
+          if let Some(k) = browse_item_play_key(&bi) {
+            if keys.contains(&k) {
+              let cloned = bi.clone();
+              drop(bi);
+              let replacement: [BoxedAnyObject; 1] = [BoxedAnyObject::new(cloned)];
+              grid_store.splice(i, 1, &replacement);
+            }
+          }
+        }
       }
     }
   }
+}
 
-  for item in &items {
-    grid_store.append(&BoxedAnyObject::new(item.clone()));
+const PAGE_SIZE: usize = 200;
+
+fn show_page(grid_store: &ListStore, all_items: &[BrowseItem], show_more_btn: &gtk::Button) {
+  let start = grid_store.n_items() as usize;
+  let end = (start + PAGE_SIZE).min(all_items.len());
+  let page: Vec<BoxedAnyObject> = all_items[start..end]
+    .iter()
+    .map(|item| BoxedAnyObject::new(item.clone()))
+    .collect();
+  let pos = grid_store.n_items();
+  grid_store.splice(pos, 0, &page);
+
+  let remaining = all_items.len() - end;
+  if remaining > 0 {
+    show_more_btn.set_label(&format!("Show More ({remaining} remaining)"));
+    show_more_btn.set_visible(true);
+  } else {
+    show_more_btn.set_visible(false);
   }
+}
+
+fn reload_grid(
+  grid_store: &ListStore,
+  sources: &[SourceKind],
+  search_query: &str,
+  all_items_buf: &Rc<RefCell<Vec<BrowseItem>>>,
+  show_more_btn: &gtk::Button,
+) {
+  grid_store.splice(0, grid_store.n_items(), &[] as &[BoxedAnyObject]);
+  show_more_btn.set_visible(false);
+
+  let sources = sources.to_vec();
+  let query = search_query.to_string();
+  let grid_store = grid_store.clone();
+  let buf = Rc::clone(all_items_buf);
+  let btn = show_more_btn.clone();
+
+  let (tx, rx) = futures::channel::oneshot::channel::<Vec<BrowseItem>>();
+  std::thread::spawn(move || {
+    let mut items: Vec<BrowseItem> = Vec::new();
+    for source in &sources {
+      for item in collect_items_for_source(source) {
+        if item_matches_search(&item, &query) {
+          items.push(item);
+        }
+      }
+    }
+    let _ = tx.send(items);
+  });
+
+  gtk::glib::spawn_future_local(async move {
+    if let Ok(items) = rx.await {
+      *buf.borrow_mut() = items;
+      show_page(&grid_store, &buf.borrow(), &btn);
+    }
+  });
 }
 
 fn get_selected_sources(tree_model: &TreeListModel, selection: &MultiSelection) -> Vec<SourceKind> {
@@ -339,47 +424,52 @@ pub fn create_browse_view(
 ) -> gtk::Box {
   let grid_store = ListStore::new::<BoxedAnyObject>();
   let search_query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+  let all_items_buf: Rc<RefCell<Vec<BrowseItem>>> = Rc::new(RefCell::new(Vec::new()));
+
+  let show_more_btn = gtk::Button::builder()
+    .css_classes(["flat"])
+    .visible(false)
+    .build();
+
+  let grid_store_for_more = grid_store.clone();
+  let buf_for_more = Rc::clone(&all_items_buf);
+  let btn_for_more = show_more_btn.clone();
+  show_more_btn.connect_clicked(move |_| {
+    show_page(&grid_store_for_more, &buf_for_more.borrow(), &btn_for_more);
+  });
 
   let content_stack = Stack::new();
   content_stack.set_hexpand(true);
   content_stack.set_vexpand(true);
 
-  let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<String>();
-  let thumb_tx = Arc::new(Mutex::new(thumb_tx));
+  let (thumb_tx, thumb_rx) = futures::channel::mpsc::unbounded::<String>();
   let pending_thumbs: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
   let grid_store_for_thumb = grid_store.clone();
-  let pending_for_poll = pending_thumbs.clone();
-  gtk::glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
-    let mut keys: Vec<String> = Vec::new();
-    while let Ok(key) = thumb_rx.try_recv() {
-      keys.push(key);
-    }
-    if !keys.is_empty() {
-      if let Ok(mut pending) = pending_for_poll.lock() {
-        for key in &keys {
-          pending.remove(key);
-        }
+  let pending_for_recv = pending_thumbs.clone();
+  gtk::glib::spawn_future_local(async move {
+    use futures::stream::StreamExt;
+    let mut thumb_rx = thumb_rx;
+    while let Some(key) = thumb_rx.next().await {
+      if let Ok(mut pending) = pending_for_recv.lock() {
+        pending.remove::<String>(&key);
       }
       let n = grid_store_for_thumb.n_items();
       for i in 0..n {
         if let Some(obj) = grid_store_for_thumb.item(i) {
           if let Ok(boxed) = obj.downcast::<BoxedAnyObject>() {
             if let Ok(item) = boxed.try_borrow::<BrowseItem>() {
-              if let Some(key) = browse_item_cache_key(&item) {
-                if keys.contains(&key) {
-                  let cloned = item.clone();
-                  drop(item);
-                  grid_store_for_thumb.remove(i);
-                  grid_store_for_thumb.insert(i, &BoxedAnyObject::new(cloned));
-                }
+              if browse_item_cache_key(&item) == Some(key.clone()) {
+                let cloned = item.clone();
+                drop(item);
+                let replacement: [BoxedAnyObject; 1] = [BoxedAnyObject::new(cloned)];
+                grid_store_for_thumb.splice(i, 1, &replacement);
               }
             }
           }
         }
       }
     }
-    gtk::glib::ControlFlow::Continue
   });
 
   // Source tree sidebar
@@ -450,13 +540,17 @@ pub fn create_browse_view(
   let tree_model_for_sel = tree_model.clone();
   let search_for_sel = Rc::clone(&search_query);
   let content_stack_for_sel = content_stack.clone();
+  let buf_for_sel = Rc::clone(&all_items_buf);
+  let btn_for_sel = show_more_btn.clone();
   source_selection.connect_selection_changed(move |sel, _, _| {
     let selected = get_selected_sources(&tree_model_for_sel, sel);
-    reload_grid(&grid_store_for_sel, &selected, &search_for_sel.borrow());
+    reload_grid(&grid_store_for_sel, &selected, &search_for_sel.borrow(), &buf_for_sel, &btn_for_sel);
     content_stack_for_sel.set_visible_child_name("grid");
   });
 
   // Grid view
+  let channel_names: Rc<std::collections::HashMap<i32, String>> = Rc::new(get_channel_name_map());
+
   let grid_factory = SignalListItemFactory::new();
   grid_factory.connect_setup(|_factory, item| {
     let list_item = item.downcast_ref::<gtk::ListItem>().unwrap();
@@ -467,16 +561,20 @@ pub fn create_browse_view(
 
   let thumb_tx_for_bind = thumb_tx.clone();
   let pending_for_bind = pending_thumbs.clone();
+  let channel_names_for_bind = Rc::clone(&channel_names);
+  let pc_for_bind = Rc::clone(&playback_controller);
   grid_factory.connect_bind(move |_factory, item| {
     let list_item = item.downcast_ref::<gtk::ListItem>().unwrap();
     let card = list_item.child().unwrap().downcast::<BrowseCard>().unwrap();
     let obj = list_item.item().unwrap().downcast::<BoxedAnyObject>().unwrap();
     let browse_item: Ref<BrowseItem> = obj.borrow();
 
+    let play_key = browse_item_play_key(&browse_item);
     match &*browse_item {
       BrowseItem::Media(media_item) => {
         card.set_title(media_item.title());
-        card.set_subtitle(media_item.artist());
+        let subtitle = media_item.artist_with_channel_names(&channel_names_for_bind);
+        card.set_subtitle(&subtitle);
         if let Some(url) = media_item.thumbnail_url() {
           if let Some(cached) = thumbnail_cache::get_cached_path(&url) {
             card.set_thumbnail_from_file(&cached);
@@ -508,6 +606,12 @@ pub fn create_browse_view(
         }
       }
     }
+
+    match (&play_key, &pc_for_bind.play_state()) {
+      (Some(key), PlayState::Loading(k)) if key == k => card.set_loading(true),
+      (Some(key), PlayState::Playing(k)) if key == k => card.set_playing(true),
+      _ => card.clear_state(),
+    }
   });
 
   grid_factory.connect_unbind(|_factory, item| {
@@ -516,6 +620,7 @@ pub fn create_browse_view(
     card.set_title("");
     card.set_subtitle("");
     card.clear_thumbnail();
+    card.clear_state();
   });
 
   let grid_selection = gtk::SingleSelection::new(Some(grid_store.clone()));
@@ -535,21 +640,36 @@ pub fn create_browse_view(
         let browse_item: Ref<BrowseItem> = boxed.borrow();
         match &*browse_item {
           BrowseItem::Media(item) => {
-            pc_for_activate.play_media_item(item);
+            let item = item.clone();
+            drop(browse_item);
+            let mut rebind_keys: Vec<String> = Vec::new();
+            match pc_for_activate.play_state() {
+              PlayState::Loading(k) | PlayState::Playing(k) => rebind_keys.push(k),
+              PlayState::Idle => {}
+            }
+            if let Some(key) = browse_item_play_key(&BrowseItem::Media(item.clone())) {
+              pc_for_activate.set_play_state(PlayState::Loading(key.clone()));
+              rebind_keys.push(key);
+            }
+            rebind_matching_items(&grid_store_for_activate, &rebind_keys);
+            pc_for_activate.play_media_item(&item);
           }
           BrowseItem::Album {
             artist,
             album,
             representative_filename,
           } => {
-            // Remove old detail page if present
+            let artist = artist.clone();
+            let album = album.clone();
+            let representative_filename = representative_filename.clone();
+            drop(browse_item);
             if let Some(old) = content_stack_for_activate.child_by_name("detail") {
               content_stack_for_activate.remove(&old);
             }
             let detail = build_album_detail(
-              artist,
-              album,
-              representative_filename,
+              &artist,
+              &album,
+              &representative_filename,
               &pc_for_activate,
               &content_stack_for_activate,
             );
@@ -560,6 +680,17 @@ pub fn create_browse_view(
       }
     }
   });
+
+  // Refresh browse cards when play state changes (Loading -> Playing)
+  let grid_store_for_state = grid_store.clone();
+  playback_controller.set_on_play_state_changed(Some(Rc::new(move |state| {
+    match state {
+      PlayState::Loading(k) | PlayState::Playing(k) => {
+        rebind_matching_items(&grid_store_for_state, &[k.clone()]);
+      }
+      PlayState::Idle => {}
+    }
+  })));
 
   // Download thumbnails button
   let download_btn = gtk::Button::builder()
@@ -573,6 +704,8 @@ pub fn create_browse_view(
   let grid_store_for_refresh = grid_store.clone();
   let tree_model_for_refresh = tree_model.clone();
   let source_sel_for_refresh = source_selection.clone();
+  let buf_for_download = Rc::clone(&all_items_buf);
+  let btn_for_download = show_more_btn.clone();
   download_btn.connect_clicked(move |btn| {
     btn.set_sensitive(false);
 
@@ -616,51 +749,53 @@ pub fn create_browse_view(
       Done(usize, usize),
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<ThumbnailProgress>();
+    let (tx, rx) = futures::channel::mpsc::unbounded::<ThumbnailProgress>();
     std::thread::spawn(move || {
       let tx_video = tx.clone();
       let (video_dl, _) = thumbnail_cache::download_all_video_thumbnails(move |done, total| {
-        let _ = tx_video.send(ThumbnailProgress::VideoProgress(done, total));
+        let _ = tx_video.unbounded_send(ThumbnailProgress::VideoProgress(done, total));
       });
 
       let tx_album = tx.clone();
       let (album_dl, _) = thumbnail_cache::download_all_album_art(move |done, total| {
-        let _ = tx_album.send(ThumbnailProgress::AlbumProgress(done, total));
+        let _ = tx_album.unbounded_send(ThumbnailProgress::AlbumProgress(done, total));
       });
 
-      let _ = tx.send(ThumbnailProgress::Done(video_dl, album_dl));
+      let _ = tx.unbounded_send(ThumbnailProgress::Done(video_dl, album_dl));
     });
 
     let btn_clone = btn.clone();
     let dialog_clone = progress_dialog.clone();
-    let status_clone = status_label.clone();
-    let progress_clone = progress_bar.clone();
     let grid_store_done = grid_store_for_refresh.clone();
     let tree_model_done = tree_model_for_refresh.clone();
     let source_sel_done = source_sel_for_refresh.clone();
     let search_done = Rc::clone(&search_for_download);
-    gtk::glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-      while let Ok(progress) = rx.try_recv() {
+    let buf_done = Rc::clone(&buf_for_download);
+    let btn_done = btn_for_download.clone();
+    gtk::glib::spawn_future_local(async move {
+      use futures::stream::StreamExt;
+      let mut rx = rx;
+      while let Some(progress) = rx.next().await {
         match progress {
           ThumbnailProgress::VideoProgress(done, total) => {
             if total > 0 {
-              progress_clone.set_fraction(done as f64 / total as f64 * 0.5);
-              progress_clone.set_text(Some(&format!("Videos: {done}/{total}")));
+              progress_bar.set_fraction(done as f64 / total as f64 * 0.5);
+              progress_bar.set_text(Some(&format!("Videos: {done}/{total}")));
             }
           }
           ThumbnailProgress::AlbumProgress(done, total) => {
             if total > 0 {
-              progress_clone.set_fraction(0.5 + done as f64 / total as f64 * 0.5);
-              progress_clone.set_text(Some(&format!("Albums: {done}/{total}")));
+              progress_bar.set_fraction(0.5 + done as f64 / total as f64 * 0.5);
+              progress_bar.set_text(Some(&format!("Albums: {done}/{total}")));
             }
           }
           ThumbnailProgress::Done(videos, albums) => {
-            status_clone.set_label(&format!("Done: {videos} video + {albums} album thumbnails downloaded"));
-            progress_clone.set_fraction(1.0);
-            progress_clone.set_text(Some("Complete"));
+            status_label.set_label(&format!("Done: {videos} video + {albums} album thumbnails downloaded"));
+            progress_bar.set_fraction(1.0);
+            progress_bar.set_text(Some("Complete"));
 
             let selected = get_selected_sources(&tree_model_done, &source_sel_done);
-            reload_grid(&grid_store_done, &selected, &search_done.borrow());
+            reload_grid(&grid_store_done, &selected, &search_done.borrow(), &buf_done, &btn_done);
 
             let dialog = dialog_clone.clone();
             let btn = btn_clone.clone();
@@ -668,11 +803,10 @@ pub fn create_browse_view(
               dialog.close();
               btn.set_sensitive(true);
             });
-            return gtk::glib::ControlFlow::Break;
+            break;
           }
         }
       }
-      gtk::glib::ControlFlow::Continue
     });
   });
 
@@ -686,17 +820,19 @@ pub fn create_browse_view(
   let tree_model_for_search = tree_model.clone();
   let source_sel_for_search = source_selection.clone();
   let search_for_entry = Rc::clone(&search_query);
+  let buf_for_search = Rc::clone(&all_items_buf);
+  let btn_for_search = show_more_btn.clone();
   search_entry.connect_search_changed(move |entry| {
     let query = entry.text().to_string();
     *search_for_entry.borrow_mut() = query.clone();
     let selected = get_selected_sources(&tree_model_for_search, &source_sel_for_search);
-    reload_grid(&grid_store_for_search, &selected, &query);
+    reload_grid(&grid_store_for_search, &selected, &query, &buf_for_search, &btn_for_search);
   });
 
   // Add YouTube channel button
   let add_channel_btn = gtk::Button::builder()
     .icon_name("list-add-symbolic")
-    .tooltip_text("Add YouTube channel")
+    .tooltip_text("Add YouTube channel or playlist")
     .css_classes(["flat"])
     .build();
 
@@ -750,6 +886,7 @@ pub fn create_browse_view(
     .build();
   grid_page.append(&search_entry);
   grid_page.append(&grid_scrolled);
+  grid_page.append(&show_more_btn);
 
   content_stack.add_named(&grid_page, Some("grid"));
   content_stack.set_visible_child_name("grid");
