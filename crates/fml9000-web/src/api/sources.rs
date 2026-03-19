@@ -16,19 +16,19 @@ pub async fn get_source_items(
 ) -> Result<Json<Vec<crate::api::tracks::MediaItemJson>>, (StatusCode, String)> {
     let items = tokio::task::spawn_blocking(move || -> Vec<MediaItem> {
         match source_id.as_str() {
-            "all_media" => get_all_media(),
-            "all_tracks" => load_tracks()
+            "all-media" | "all_media" => get_all_media(),
+            "all-tracks" | "all_tracks" => load_tracks()
                 .unwrap_or_default()
                 .into_iter()
                 .map(MediaItem::Track)
                 .collect(),
-            "all_videos" => get_all_videos()
+            "all-videos" | "all_videos" => get_all_videos()
                 .unwrap_or_default()
                 .into_iter()
                 .map(MediaItem::Video)
                 .collect(),
-            "recently_added" => load_recently_added_items(0),
-            "recently_played" => load_recently_played_items(100),
+            "recently-added" | "recently_added" => load_recently_added_items(0),
+            "recently-played" | "recently_played" => load_recently_played_items(100),
             "queue" => get_queue_items(),
             _ => Vec::new(),
         }

@@ -88,8 +88,8 @@
   color: var(--text);
 }
 
-.active {
-  color: var(--accent) !important;
+.active.active {
+  color: var(--accent);
 }
 
 .volume {

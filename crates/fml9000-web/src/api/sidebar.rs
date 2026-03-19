@@ -15,8 +15,20 @@ pub struct SidebarData {
 #[derive(serde_derive::Serialize)]
 pub struct NavItem {
     id: String,
+    db_id: Option<i32>,
     label: String,
     kind: String,
+}
+
+fn slugify(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 pub async fn get_sidebar(
@@ -32,17 +44,18 @@ pub async fn get_sidebar(
 
     Json(SidebarData {
         auto_playlists: vec![
-            NavItem { id: "all_media".into(), label: "All Media".into(), kind: "auto".into() },
-            NavItem { id: "all_tracks".into(), label: "All Tracks".into(), kind: "auto".into() },
-            NavItem { id: "all_videos".into(), label: "All Videos".into(), kind: "auto".into() },
-            NavItem { id: "recently_added".into(), label: "Recently Added".into(), kind: "auto".into() },
-            NavItem { id: "recently_played".into(), label: "Recently Played".into(), kind: "auto".into() },
-            NavItem { id: "queue".into(), label: "Playback Queue".into(), kind: "auto".into() },
+            NavItem { id: "all-media".into(), db_id: None, label: "All Media".into(), kind: "auto".into() },
+            NavItem { id: "all-tracks".into(), db_id: None, label: "All Tracks".into(), kind: "auto".into() },
+            NavItem { id: "all-videos".into(), db_id: None, label: "All Videos".into(), kind: "auto".into() },
+            NavItem { id: "recently-added".into(), db_id: None, label: "Recently Added".into(), kind: "auto".into() },
+            NavItem { id: "recently-played".into(), db_id: None, label: "Recently Played".into(), kind: "auto".into() },
+            NavItem { id: "queue".into(), db_id: None, label: "Playback Queue".into(), kind: "auto".into() },
         ],
         user_playlists: playlists
             .iter()
             .map(|p| NavItem {
-                id: format!("playlist_{}", p.id),
+                id: format!("playlist-{}", slugify(&p.name)),
+                db_id: Some(p.id),
                 label: p.name.clone(),
                 kind: "playlist".into(),
             })
@@ -50,7 +63,8 @@ pub async fn get_sidebar(
         youtube_channels: channels
             .iter()
             .map(|c| NavItem {
-                id: format!("channel_{}", c.id),
+                id: format!("channel-{}", slugify(&c.name)),
+                db_id: Some(c.id),
                 label: c.name.clone(),
                 kind: "channel".into(),
             })

@@ -8,9 +8,19 @@ export const [searchQuery, setSearchQuery] = createSignal("");
 export const [currentView, setCurrentView] = createSignal<"table" | "browse">("table");
 export const [sortCol, setSortCol] = createSignal<keyof TrackItem | null>(null);
 export const [sortAsc, setSortAsc] = createSignal(true);
-export const [activeNavId, setActiveNavId] = createSignal(
-  new URLSearchParams(location.search).get("source") ?? "all_tracks"
+
+function parseSelectedSources(): Set<string> {
+  const param = new URLSearchParams(location.search).get("source") ?? "all-tracks";
+  return new Set(param.split(",").filter(Boolean));
+}
+
+export const [selectedSources, setSelectedSources] = createSignal<Set<string>>(
+  parseSelectedSources()
 );
+
+export function isSourceSelected(id: string) {
+  return selectedSources().has(id);
+}
 
 export function filterTracks(query: string) {
   setSearchQuery(query);

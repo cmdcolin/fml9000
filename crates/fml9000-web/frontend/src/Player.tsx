@@ -41,7 +41,7 @@ export function Player() {
   onCleanup(() => document.removeEventListener("keydown", onKeyDown));
 
   const seekValue = createMemo(() => {
-    if (seeking()) return seekRef?.value ? Number(seekRef.value) : 0;
+    if (seeking()) return Number(seekRef?.value ?? 0);
     const s = playbackState();
     if (s && s.duration_secs && s.duration_secs > 0) {
       return Math.round((s.position_secs / s.duration_secs) * 1000);
@@ -50,19 +50,17 @@ export function Player() {
   });
 
   const volumeValue = createMemo(() => {
-    if (volDragging()) return undefined;
+    if (volDragging()) return -1;
     return Math.round((playbackState()?.volume ?? 1) * 100);
   });
 
   const currentTime = createMemo(() =>
     fmtDur(Math.floor(playbackState()?.position_secs ?? 0))
   );
-
   const totalTime = createMemo(() => {
     const d = playbackState()?.duration_secs;
     return d ? fmtDur(Math.floor(d)) : "0:00";
   });
-
   const npTitle = createMemo(() => playbackState()?.current_track?.title ?? "-");
   const npArtist = createMemo(() => playbackState()?.current_track?.artist ?? "-");
   const npAlbum = createMemo(() => playbackState()?.current_track?.album ?? "-");
@@ -115,7 +113,7 @@ export function Player() {
         >{repeatMode() === "one" ? "\uD83D\uDD02" : "\uD83D\uDD01"}</button>
         <input
           type="range" class={styles.volume} min="0" max="100"
-          prop:value={volumeValue() ?? 100}
+          prop:value={volumeValue() >= 0 ? volumeValue() : 100}
           onmousedown={() => setVolDragging(true)}
           oninput={(e) => {
             setVolDragging(true);

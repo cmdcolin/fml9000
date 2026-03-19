@@ -69,11 +69,25 @@ cargo run -p fml9000-web                      # terminal 1 - axum on :8080
 cd crates/fml9000-web/frontend && pnpm dev    # terminal 2 - vite on :5173
 ```
 
-Features: track table with sorting/search, album browse grid with cover art,
-sidebar navigation (auto playlists, user playlists, YouTube channels), playback
-controls, seek/volume, shuffle/repeat, right-click context menus, keyboard
-shortcuts, WebSocket real-time state updates, auto-advance, play count
-tracking, settings persistence, URL hash routing.
+**Stack**: axum (Rust) server + SolidJS + TypeScript + Vite 8 + CSS Modules
+
+**Features**:
+- Track list view with column sorting, search/filter
+- Album browse grid with cover art thumbnails and "show more" pagination
+- Sidebar with auto playlists, user playlists, YouTube channels
+- Multi-select mode (toggle with checkbox button) to merge multiple sources
+- Playback controls: play/pause/stop/next/prev, seek bar, volume slider
+- Shuffle and repeat mode toggles
+- Right-click context menus (add to queue, add to playlist)
+- WebSocket real-time playback state updates (250ms)
+- Auto-advance to next track, play count tracking (50% threshold)
+- Album art extracted on startup (embedded tags, folder images, any jpg/png fallback)
+- YouTube video thumbnails from ytimg
+- Keyboard shortcuts (Space, n, p, s)
+- URL query params for view state (`?view=browse&source=channel-name`)
+- Settings persistence (volume, shuffle, repeat saved to config.toml)
+- Hover tooltips on browse cards with title, artist, genre, play count
+- Dark theme (Catppuccin-inspired)
 
 
 ## TUI Keyboard Shortcuts

@@ -34,6 +34,7 @@ export interface PlaybackState {
 
 export interface NavItem {
   id: string;
+  db_id: number | null;
   label: string;
   kind: string;
 }
