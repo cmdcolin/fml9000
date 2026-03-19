@@ -81,8 +81,8 @@ export function TrackTable() {
             <div
               class={styles.th}
               classList={{
-                [styles.sortAsc]: sortCol() === col.key && sortAsc(),
-                [styles.sortDesc]: sortCol() === col.key && !sortAsc(),
+                [styles.sortAsc!]: sortCol() === col.key && sortAsc(),
+                [styles.sortDesc!]: sortCol() === col.key && !sortAsc(),
               }}
               onclick={() => sortTracks(col.key)}
             >
@@ -96,14 +96,14 @@ export function TrackTable() {
           {(row) => (
             <div
               class={styles.row}
-              classList={{ [styles.playing]: playingIndex() === row.idx }}
+              classList={{ [styles.playing!]: playingIndex() === row.idx }}
               style={{ "grid-template-columns": GRID_COLS }}
               ondblclick={() => post("playback/play", { index: row.idx })}
               oncontextmenu={(e) => trackContextMenu(e, row.track)}
             >
               <For each={COLUMNS}>
                 {(col) => (
-                  <div class={styles.cell} classList={{ [styles.cellDim]: !!col.dim }}>
+                  <div class={styles.cell} classList={{ [styles.cellDim!]: !!col.dim }}>
                     {col.fmt ? col.fmt(row.track[col.key]) : String(row.track[col.key] ?? "")}
                   </div>
                 )}

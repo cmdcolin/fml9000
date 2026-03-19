@@ -95,7 +95,7 @@ export function Sidebar() {
       <div class={styles.toolbar}>
         <button
           class={styles.toolbarBtn}
-          classList={{ [styles.toolbarBtnActive]: multiSelect() }}
+          classList={{ [styles.toolbarBtnActive!]: multiSelect() }}
           onclick={() => setMultiSelect((m) => !m)}
           title="Toggle multi-select"
         >
@@ -170,7 +170,7 @@ function Section(props: SectionProps) {
           <Show when={props.multiSelect} fallback={
             <div
               class={styles.item}
-              classList={{ [styles.itemActive]: isSourceSelected(item.id) }}
+              classList={{ [styles.itemActive!]: isSourceSelected(item.id) }}
               onclick={() => props.onSelect(item)}
               oncontextmenu={(e) => {
                 if (props.onContext) { e.preventDefault(); props.onContext(e, item); }
@@ -184,7 +184,7 @@ function Section(props: SectionProps) {
           }>
             <label
               class={styles.item}
-              classList={{ [styles.itemActive]: isSourceSelected(item.id) }}
+              classList={{ [styles.itemActive!]: isSourceSelected(item.id) }}
               oncontextmenu={(e) => {
                 if (props.onContext) { e.preventDefault(); props.onContext(e, item); }
               }}

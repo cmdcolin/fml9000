@@ -89,7 +89,7 @@ export function Player() {
         <input
           type="range" min="0" max="1000"
           ref={seekRef}
-          prop:value={seekValue()}
+          value={seekValue()}
           onmousedown={() => setSeeking(true)}
           oninput={() => setSeeking(true)}
           onchange={onSeekChange}
@@ -98,12 +98,12 @@ export function Player() {
       </div>
       <div class={styles.controlsRight}>
         <button
-          classList={{ [styles.active]: shuffleActive() }}
+          classList={{ [styles.active!]: shuffleActive() }}
           onclick={() => post("playback/shuffle", { enabled: !shuffleActive() })}
           title="Shuffle"
         >{"\uD83D\uDD00"}</button>
         <button
-          classList={{ [styles.active]: repeatActive() }}
+          classList={{ [styles.active!]: repeatActive() }}
           onclick={() => {
             const modes = ["off", "all", "one"] as const;
             const cur = modes.indexOf(repeatMode() as typeof modes[number]);
@@ -113,7 +113,7 @@ export function Player() {
         >{repeatMode() === "one" ? "\uD83D\uDD02" : "\uD83D\uDD01"}</button>
         <input
           type="range" class={styles.volume} min="0" max="100"
-          prop:value={volumeValue() >= 0 ? volumeValue() : 100}
+          value={volumeValue() >= 0 ? volumeValue() : 100}
           onmousedown={() => setVolDragging(true)}
           oninput={(e) => {
             setVolDragging(true);

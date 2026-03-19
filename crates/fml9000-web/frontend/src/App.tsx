@@ -43,12 +43,12 @@ export function App() {
           <div class={styles.viewTabs}>
             <button
               class={styles.viewTab}
-              classList={{ [styles.viewTabActive]: currentView() === "table" }}
+              classList={{ [styles.viewTabActive!]: currentView() === "table" }}
               onclick={() => switchView("table")}
             >List</button>
             <button
               class={styles.viewTab}
-              classList={{ [styles.viewTabActive]: currentView() === "browse" }}
+              classList={{ [styles.viewTabActive!]: currentView() === "browse" }}
               onclick={() => switchView("browse")}
             >Browse</button>
           </div>
