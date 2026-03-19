@@ -5,6 +5,7 @@ members = [
   "crates/fml9000-gtk",
   "crates/fml9000-tui",
   "crates/fml9000-scan",
+  "crates/fml9000-web",
 ]
 
 [workspace.package]

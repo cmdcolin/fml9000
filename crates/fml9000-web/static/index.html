@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fml9000</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div class="transport">
+        <button id="btn-prev" title="Previous">&#x23EE;</button>
+        <button id="btn-play" title="Play/Pause">&#x25B6;</button>
+        <button id="btn-stop" title="Stop">&#x23F9;</button>
+        <button id="btn-next" title="Next">&#x23ED;</button>
+      </div>
+      <div class="now-playing">
+        <span id="np-title">-</span>
+        <span id="np-artist">-</span>
+        <span id="np-album">-</span>
+      </div>
+      <div class="seek-bar">
+        <span id="time-current">0:00</span>
+        <input type="range" id="seek" min="0" max="1000" value="0">
+        <span id="time-total">0:00</span>
+      </div>
+      <div class="controls-right">
+        <button id="btn-shuffle" title="Shuffle">&#x1F500;</button>
+        <button id="btn-repeat" title="Repeat">&#x1F501;</button>
+        <input type="range" id="volume" min="0" max="100" value="100" title="Volume">
+      </div>
+    </header>
+
+    <div id="body">
+      <nav id="sidebar">
+        <div class="sidebar-loading">Loading...</div>
+      </nav>
+
+      <div id="content">
+        <div id="view-tabs">
+          <button id="tab-list" class="view-tab active">List</button>
+          <button id="tab-browse" class="view-tab">Browse</button>
+        </div>
+
+        <div id="track-search">
+          <input type="text" id="search-input" placeholder="Search tracks...">
+          <span id="track-count"></span>
+        </div>
+
+        <div id="table-container">
+          <div id="table-header">
+            <div class="th" data-col="t">Title</div>
+            <div class="th" data-col="ar">Artist</div>
+            <div class="th" data-col="al">Album</div>
+            <div class="th" data-col="tr">Track</div>
+            <div class="th" data-col="g">Genre</div>
+            <div class="th" data-col="d">Duration</div>
+            <div class="th" data-col="pc">Plays</div>
+            <div class="th" data-col="lp">Last Played</div>
+          </div>
+          <div id="table-scroll">
+            <div id="table-spacer"></div>
+            <div id="table-rows"></div>
+          </div>
+        </div>
+
+        <div id="browse-container" style="display:none">
+          <input type="text" id="browse-search" placeholder="Search albums...">
+          <div id="browse-grid"></div>
+          <div id="browse-detail" style="display:none">
+            <button id="browse-back" class="back-btn">&larr; Back</button>
+            <div class="browse-detail-header">
+              <img id="browse-detail-art" class="browse-detail-art">
+              <div>
+                <div id="browse-detail-title" class="browse-detail-title"></div>
+                <div id="browse-detail-artist" class="browse-detail-artist"></div>
+              </div>
+            </div>
+            <div id="browse-detail-tracks"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="/app.js"></script>
+  <script src="/virtual-table.js"></script>
+  <script src="/player.js"></script>
+  <script src="/sidebar.js"></script>
+  <script src="/browse.js"></script>
+</body>
+</html>
