@@ -32,7 +32,7 @@ export function filterTracks(query: string) {
   const q = query.toLowerCase();
   const result: number[] = [];
   for (let i = 0; i < items.length; i++) {
-    const t = items[i];
+    const t = items[i]!;
     if (
       (t.t && t.t.toLowerCase().includes(q)) ||
       (t.ar && t.ar.toLowerCase().includes(q)) ||
@@ -56,8 +56,8 @@ export function sortTracks(col: keyof TrackItem) {
   const dir = sortAsc() ? 1 : -1;
   const indices = [...filteredIndices()];
   indices.sort((a, b) => {
-    const va = items[a][col] ?? "";
-    const vb = items[b][col] ?? "";
+    const va = items[a]?.[col] ?? "";
+    const vb = items[b]?.[col] ?? "";
     if (typeof va === "number" && typeof vb === "number") {
       return (va - vb) * dir;
     }
@@ -70,6 +70,8 @@ export function sortTracks(col: keyof TrackItem) {
   setFilteredIndices(indices);
 }
 
+export const [youtubeRefreshCount, setYoutubeRefreshCount] = createSignal(0);
+
 export function connectWebSocket() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -77,6 +79,8 @@ export function connectWebSocket() {
     const msg = JSON.parse(e.data);
     if (msg.type === "playback_state") {
       setPlaybackState(msg.data);
+    } else if (msg.type === "youtube_refresh") {
+      setYoutubeRefreshCount((c) => c + 1);
     }
   };
   ws.onclose = () => setTimeout(connectWebSocket, 2000);

@@ -5,6 +5,118 @@ mod ws;
 
 use state::{AppState, AudioCommand};
 
+fn refresh_youtube_channels(state: &AppState) {
+    let channels = fml9000_core::get_youtube_channels().unwrap_or_default();
+    if channels.is_empty() {
+        return;
+    }
+
+    let now = chrono::Utc::now().naive_utc();
+    let min_age = chrono::Duration::hours(6);
+    let channels_to_refresh: Vec<_> = channels
+        .iter()
+        .filter(|c| {
+            c.last_fetched
+                .map(|lf| now - lf > min_age)
+                .unwrap_or(true)
+        })
+        .collect();
+
+    if channels_to_refresh.is_empty() {
+        return;
+    }
+
+    println!(
+        "Refreshing {} of {} YouTube channels (skipping recently checked)...",
+        channels_to_refresh.len(),
+        channels.len()
+    );
+
+    for (i, channel) in channels_to_refresh.iter().enumerate() {
+        // Be polite: wait between channels
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+
+        let existing = match fml9000_core::get_video_ids_for_channel(channel.id) {
+            Ok(ids) => ids,
+            Err(e) => {
+                eprintln!("  Failed to get video IDs for {}: {e}", channel.name);
+                continue;
+            }
+        };
+
+        let playlist_id = match fml9000_core::get_playlist_id_for_handle(
+            channel.handle.as_deref().unwrap_or(&channel.channel_id),
+        ) {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("  Failed to get playlist ID for {}: {e}", channel.name);
+                continue;
+            }
+        };
+
+        // Small pause between API calls for same channel
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        let new_videos = match fml9000_core::fetch_new_videos(
+            &playlist_id,
+            &existing,
+            false,
+            |_, _| {},
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("  Failed to fetch new videos for {}: {e}", channel.name);
+                continue;
+            }
+        };
+
+        // Always update last_fetched so we don't retry immediately
+        if let Err(e) = fml9000_core::update_channel_last_fetched(channel.id) {
+            eprintln!("  Failed to update last_fetched: {e}");
+        }
+
+        if !new_videos.is_empty() {
+            println!("  {} new videos for {}", new_videos.len(), channel.name);
+
+            let videos_for_db: Vec<_> = new_videos
+                .iter()
+                .map(|v| {
+                    (
+                        v.video_id.clone(),
+                        v.title.clone(),
+                        None::<i32>,
+                        v.thumbnail_url.clone(),
+                        v.published_at,
+                    )
+                })
+                .collect();
+
+            if let Err(e) = fml9000_core::add_youtube_videos(channel.id, &videos_for_db) {
+                eprintln!("  Failed to insert videos: {e}");
+                continue;
+            }
+
+            state
+                .new_video_counts
+                .lock()
+                .unwrap()
+                .insert(channel.id, new_videos.len());
+
+            if let Ok(json) = serde_json::to_string(&serde_json::json!({
+                "type": "youtube_refresh",
+                "channel_id": channel.id,
+                "channel_name": channel.name,
+                "new_count": new_videos.len(),
+            })) {
+                let _ = state.ws_broadcast.send(json);
+            }
+        }
+    }
+    println!("YouTube refresh complete.");
+}
+
 #[tokio::main]
 async fn main() {
     let port: u16 = std::env::args()
@@ -47,6 +159,19 @@ async fn main() {
                 }
             });
         println!("Video thumbnails: downloaded {downloaded} new from {total} videos");
+    });
+
+    // Background YouTube channel refresh (every 6 hours, with polite delays)
+    let refresh_state = state.clone();
+    tokio::spawn(async move {
+        // Wait 2 minutes after startup before first check
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        loop {
+            let rs = refresh_state.clone();
+            tokio::task::spawn_blocking(move || refresh_youtube_channels(&rs)).await.ok();
+            // Check every 6 hours
+            tokio::time::sleep(std::time::Duration::from_secs(6 * 60 * 60)).await;
+        }
     });
 
     let tick_state = state.clone();

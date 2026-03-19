@@ -4,6 +4,7 @@ import { Player } from "./Player";
 import { Sidebar } from "./Sidebar";
 import { TrackTable, SearchBar } from "./TrackTable";
 import { Browse } from "./Browse";
+import { InputDialog } from "./InputDialog";
 import styles from "./App.module.css";
 import "./style.css";
 
@@ -34,6 +35,7 @@ export function App() {
 
   return (
     <>
+      <InputDialog />
       <Player />
       <div class={styles.body}>
         <Sidebar />

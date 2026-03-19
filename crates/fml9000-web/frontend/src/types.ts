@@ -37,6 +37,7 @@ export interface NavItem {
   db_id: number | null;
   label: string;
   kind: string;
+  new_count?: number;
 }
 
 export interface SidebarData {

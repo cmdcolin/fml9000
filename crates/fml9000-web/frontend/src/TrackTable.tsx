@@ -61,7 +61,14 @@ function trackContextMenu(e: MouseEvent, track: TrackItem) {
 export function TrackTable() {
   const rows = createMemo(() => {
     const items = tracks();
-    return filteredIndices().map((idx) => ({ idx, track: items[idx] }));
+    const indices = filteredIndices();
+    const result: { idx: number; track: TrackItem }[] = [];
+    for (const idx of indices) {
+      if (items[idx]) {
+        result.push({ idx, track: items[idx] });
+      }
+    }
+    return result;
   });
 
   const playingIndex = createMemo(() => playbackState()?.current_index ?? null);

@@ -4,7 +4,9 @@ use fml9000_core::{
 };
 use rodio::Decoder;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Cursor};
+use std::process::{Command, Stdio};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -36,6 +38,11 @@ pub enum AudioCommand {
         path: String,
         respond: mpsc::Sender<Result<f64, String>>,
     },
+    PlayYouTube {
+        video_id: String,
+        duration_hint: Option<f64>,
+        respond: mpsc::Sender<Result<f64, String>>,
+    },
     Pause,
     Resume,
     Stop,
@@ -51,6 +58,37 @@ pub struct AudioThreadState {
     pub position_secs: f64,
     pub duration_secs: Option<f64>,
     pub volume: f32,
+}
+
+fn download_youtube_audio(video_id: &str) -> Result<Vec<u8>, String> {
+    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    let child = Command::new("yt-dlp")
+        .args([
+            "-f", "bestaudio",
+            "-o", "-",
+            "--no-warnings",
+            "--quiet",
+            &url,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run yt-dlp: {e}"))?;
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("yt-dlp failed: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("yt-dlp error: {stderr}"));
+    }
+
+    if output.stdout.is_empty() {
+        return Err("yt-dlp returned no audio data".into());
+    }
+
+    Ok(output.stdout)
 }
 
 fn run_audio_thread(rx: mpsc::Receiver<AudioCommand>) {
@@ -82,6 +120,32 @@ fn run_audio_thread(rx: mpsc::Receiver<AudioCommand>) {
                 audio.play_source(source, duration);
                 audio.set_volume(volume);
                 let _ = respond.send(Ok(duration.map(|d| d.as_secs_f64()).unwrap_or(0.0)));
+            }
+            AudioCommand::PlayYouTube { video_id, duration_hint, respond } => {
+                eprintln!("Downloading YouTube audio for {video_id}...");
+                let data = match download_youtube_audio(&video_id) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = respond.send(Err(e));
+                        continue;
+                    }
+                };
+                eprintln!("Downloaded {} bytes, decoding...", data.len());
+                let cursor = Cursor::new(data);
+                let source = match Decoder::new(cursor) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = respond.send(Err(format!("Cannot decode YouTube audio: {e}")));
+                        continue;
+                    }
+                };
+                use rodio::Source;
+                let duration = source.total_duration()
+                    .or_else(|| duration_hint.map(|s| Duration::from_secs_f64(s)));
+                audio.play_source(source, duration);
+                audio.set_volume(volume);
+                let dur_secs = duration.map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                let _ = respond.send(Ok(dur_secs));
             }
             AudioCommand::Pause => audio.pause(),
             AudioCommand::Resume => audio.play(),
@@ -132,6 +196,7 @@ pub struct AppState {
     was_playing: AtomicBool,
     play_stats: Mutex<PlayStats>,
     pub volume: Mutex<f32>,
+    pub new_video_counts: Mutex<HashMap<i32, usize>>,
 }
 
 impl AppState {
@@ -151,6 +216,7 @@ impl AppState {
             was_playing: AtomicBool::new(false),
             play_stats: Mutex::new(PlayStats::None),
             volume: Mutex::new(1.0),
+            new_video_counts: Mutex::new(HashMap::new()),
         })
     }
 
@@ -177,10 +243,19 @@ impl AppState {
             path: path.to_string(),
             respond: tx,
         });
-        let duration_secs = rx
-            .recv()
-            .map_err(|e| format!("Audio thread error: {e}"))??;
-        Ok(duration_secs)
+        rx.recv().map_err(|e| format!("Audio thread error: {e}"))?
+    }
+
+    pub fn play_youtube(&self, video_id: &str, duration_hint: Option<f64>) -> Result<f64, String> {
+        let (tx, rx) = mpsc::channel();
+        self.send_audio(AudioCommand::PlayYouTube {
+            video_id: video_id.to_string(),
+            duration_hint,
+            respond: tx,
+        });
+        // YouTube download can take a while — use a generous timeout
+        rx.recv_timeout(Duration::from_secs(120))
+            .map_err(|e| format!("YouTube playback timeout: {e}"))?
     }
 
     pub fn play_index(&self, index: usize) -> Result<(), String> {
@@ -206,7 +281,30 @@ impl AppState {
                 self.broadcast_state();
                 Ok(())
             }
-            MediaItem::Video(_) => Err("YouTube playback not yet supported in web UI".into()),
+            MediaItem::Video(video) => {
+                let duration_hint = video.duration_seconds.map(|s| s as f64);
+                let duration_secs = self.play_youtube(&video.video_id, duration_hint)?;
+                *self.current_index.write().unwrap() = Some(index);
+                self.was_playing.store(true, Ordering::Relaxed);
+
+                let effective_duration = if duration_secs > 0.0 {
+                    duration_secs
+                } else {
+                    duration_hint.unwrap_or(0.0)
+                };
+
+                *self.play_stats.lock().unwrap() = PlayStats::Video {
+                    id: video.id,
+                    duration_secs: effective_duration,
+                    counted: false,
+                };
+
+                let item_clone = item.clone();
+                std::thread::spawn(move || mark_as_played(&item_clone));
+
+                self.broadcast_state();
+                Ok(())
+            }
         }
     }
 

@@ -1,11 +1,12 @@
-import { createSignal, createResource, createEffect, For, Show } from "solid-js";
+import { createSignal, createResource, createEffect, For, Show, batch } from "solid-js";
 import type { NavItem, SidebarData, TrackItem } from "./types";
 import {
   selectedSources, setSelectedSources, isSourceSelected,
-  setTracks, setFilteredIndices, setSearchQuery,
+  setTracks, setFilteredIndices, setSearchQuery, youtubeRefreshCount,
 } from "./state";
 import { get, post, del, put } from "./api";
 import { showContextMenu } from "./util";
+import { showInputDialog } from "./InputDialog";
 import { updateUrlParams } from "./App";
 import styles from "./Sidebar.module.css";
 
@@ -45,8 +46,10 @@ export function Sidebar() {
     setSearchQuery("");
     const results = await Promise.all(items.map(fetchItemsForSource));
     const merged: TrackItem[] = results.flat();
-    setTracks(merged);
-    setFilteredIndices(merged.map((_, i) => i));
+    batch(() => {
+      setTracks(merged);
+      setFilteredIndices(merged.map((_, i) => i));
+    });
   }
 
   function selectOnly(item: NavItem) {
@@ -79,6 +82,14 @@ export function Sidebar() {
     loadSelectedItems();
   });
 
+  // Refetch sidebar when YouTube channels are refreshed
+  createEffect(() => {
+    youtubeRefreshCount();
+    if (restored) {
+      refetch();
+    }
+  });
+
   return (
     <nav class={styles.sidebar}>
       <div class={styles.toolbar}>
@@ -99,13 +110,13 @@ export function Sidebar() {
             title="Playlists" items={d().user_playlists}
             multiSelect={multiSelect()} onSelect={selectOnly} onToggle={toggleSource}
             onAdd={async () => {
-              const name = prompt("Playlist name:");
+              const name = await showInputDialog({ title: "New Playlist", placeholder: "Playlist name" });
               if (name) { await post("playlists", { name }); refetch(); }
             }}
             onContext={(e, item) => {
               showContextMenu(e, [
                 { label: "Rename", action: async () => {
-                  const n = prompt("New name:", item.label);
+                  const n = await showInputDialog({ title: "Rename Playlist", placeholder: "New name", defaultValue: item.label });
                   if (n && item.db_id != null) { await put(`playlists/${item.db_id}`, { name: n }); refetch(); }
                 }},
                 { label: "Delete", danger: true, action: async () => {
@@ -118,7 +129,7 @@ export function Sidebar() {
             title="YouTube" items={d().youtube_channels}
             multiSelect={multiSelect()} onSelect={selectOnly} onToggle={toggleSource}
             onAdd={async () => {
-              const url = prompt("YouTube channel URL or @handle:");
+              const url = await showInputDialog({ title: "Add YouTube Channel", placeholder: "URL or @handle" });
               if (url) { await post("youtube/channels", { url }); refetch(); }
             }}
             onContext={(e, item) => {
@@ -165,7 +176,10 @@ function Section(props: SectionProps) {
                 if (props.onContext) { e.preventDefault(); props.onContext(e, item); }
               }}
             >
-              {item.label}
+              <span class={styles.itemLabel}>{item.label}</span>
+              <Show when={item.new_count}>
+                <span class={styles.badge}>{item.new_count}</span>
+              </Show>
             </div>
           }>
             <label
@@ -182,6 +196,9 @@ function Section(props: SectionProps) {
                 onchange={(e) => props.onToggle(item, e.currentTarget.checked)}
               />
               <span class={styles.itemLabel}>{item.label}</span>
+              <Show when={item.new_count}>
+                <span class={styles.badge}>{item.new_count}</span>
+              </Show>
             </label>
           </Show>
         )}

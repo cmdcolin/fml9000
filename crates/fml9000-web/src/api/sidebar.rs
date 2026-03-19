@@ -18,6 +18,8 @@ pub struct NavItem {
     db_id: Option<i32>,
     label: String,
     kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_count: Option<usize>,
 }
 
 fn slugify(s: &str) -> String {
@@ -32,8 +34,10 @@ fn slugify(s: &str) -> String {
 }
 
 pub async fn get_sidebar(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> Json<SidebarData> {
+    let new_counts = state.new_video_counts.lock().unwrap().clone();
+
     let (playlists, channels) = tokio::task::spawn_blocking(|| {
         let playlists = get_user_playlists().unwrap_or_default();
         let channels = get_youtube_channels().unwrap_or_default();
@@ -42,14 +46,18 @@ pub async fn get_sidebar(
     .await
     .unwrap_or_default();
 
+    let auto = |id: &str, label: &str| NavItem {
+        id: id.into(), db_id: None, label: label.into(), kind: "auto".into(), new_count: None,
+    };
+
     Json(SidebarData {
         auto_playlists: vec![
-            NavItem { id: "all-media".into(), db_id: None, label: "All Media".into(), kind: "auto".into() },
-            NavItem { id: "all-tracks".into(), db_id: None, label: "All Tracks".into(), kind: "auto".into() },
-            NavItem { id: "all-videos".into(), db_id: None, label: "All Videos".into(), kind: "auto".into() },
-            NavItem { id: "recently-added".into(), db_id: None, label: "Recently Added".into(), kind: "auto".into() },
-            NavItem { id: "recently-played".into(), db_id: None, label: "Recently Played".into(), kind: "auto".into() },
-            NavItem { id: "queue".into(), db_id: None, label: "Playback Queue".into(), kind: "auto".into() },
+            auto("all-media", "All Media"),
+            auto("all-tracks", "All Tracks"),
+            auto("all-videos", "All Videos"),
+            auto("recently-added", "Recently Added"),
+            auto("recently-played", "Recently Played"),
+            auto("queue", "Playback Queue"),
         ],
         user_playlists: playlists
             .iter()
@@ -58,15 +66,20 @@ pub async fn get_sidebar(
                 db_id: Some(p.id),
                 label: p.name.clone(),
                 kind: "playlist".into(),
+                new_count: None,
             })
             .collect(),
         youtube_channels: channels
             .iter()
-            .map(|c| NavItem {
-                id: format!("channel-{}", slugify(&c.name)),
-                db_id: Some(c.id),
-                label: c.name.clone(),
-                kind: "channel".into(),
+            .map(|c| {
+                let count = new_counts.get(&c.id).copied().filter(|n| *n > 0);
+                NavItem {
+                    id: format!("channel-{}", slugify(&c.name)),
+                    db_id: Some(c.id),
+                    label: c.name.clone(),
+                    kind: "channel".into(),
+                    new_count: count,
+                }
             })
             .collect(),
     })
